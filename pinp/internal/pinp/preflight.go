@@ -177,7 +177,7 @@ func RunChecks(env *Env) Report {
 			r.add("cgroup version", StatusWarn, info.Host.CgroupsVersion)
 		}
 		if info.Host.Security.SELinuxEnabled {
-			r.add("selinux", StatusWarn, "enabled; pinp-e always injects label=disable")
+			r.add("selinux", StatusWarn, "enabled; pinp-e conditionally injects label=disable; set PINP_SELINUX=off to disable")
 		} else {
 			r.add("selinux", StatusPass, "disabled")
 		}
@@ -210,6 +210,12 @@ func RunChecks(env *Env) Report {
 		r.expect("runtime", cfg.Containers.Engine.Runtime, "crun")
 		r.expect("driver", cfg.Storage.Storage.Driver, "overlay")
 		r.expect("mount_program", cfg.Storage.Storage.Options.Overlay.MountProgram, "/usr/bin/fuse-overlayfs")
+		if cfg.Containers.Containers.UserNS != "" {
+			r.add("config userns", StatusWarn, fmt.Sprintf("containers.conf userns=%q would collide with injected --uidmap and is silently overridden", cfg.Containers.Containers.UserNS))
+		}
+		if v := os.Getenv("PODMAN_USERNS"); v != "" {
+			r.add("env PODMAN_USERNS", StatusWarn, fmt.Sprintf("PODMAN_USERNS=%q would collide with injected --uidmap and is silently overridden", v))
+		}
 		if hasString(cfg.Storage.Storage.Options.AdditionalImageStores, SharedStorePath) {
 			r.add("config additionalimagestores", StatusPass, SharedStorePath)
 		} else {

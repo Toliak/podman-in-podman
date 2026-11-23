@@ -32,8 +32,6 @@ def test_run_injection(binaries: Path, tmp_path: Path) -> None:
     assert explained_argv(result) == [
         "podman",
         "run",
-        "--security-opt",
-        "label=disable",
         "--device",
         "/dev/fuse",
         "-v",

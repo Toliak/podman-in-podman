@@ -2,6 +2,7 @@ package pinp
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -111,12 +112,73 @@ func InjectAt(args []string, idx int, extra []string) []string {
 	return out
 }
 
-func OuterRunArgs(env *Env, uidmaps, gidmaps []string) []string {
-	args := []string{
-		"--security-opt", "label=disable",
-		"--device", DefaultFuseDevice,
-		"-v", env.Store + ":" + SharedStorePath + env.StoreOpts,
+func SELinuxEnabled(env *Env) bool {
+	switch env.SELinux {
+	case "on":
+		return true
+	case "off":
+		return false
+	default:
+		_, err := os.Stat(env.SELinuxFS)
+		return err == nil
 	}
+}
+
+func SecurityLabelConflict(args []string) string {
+	for i := 0; i < len(args); i++ {
+		token := args[i]
+		name := token
+		value := ""
+		hasValue := false
+		if idx := strings.IndexByte(token, '='); idx >= 0 {
+			name = token[:idx]
+			value = token[idx+1:]
+			hasValue = true
+		}
+		if name != "--security-opt" {
+			continue
+		}
+		if !hasValue && i+1 < len(args) {
+			value = args[i+1]
+		}
+		if strings.HasPrefix(value, "label=") {
+			return "--security-opt " + value
+		}
+	}
+	return ""
+}
+
+func FindUserns(args []string) (value string, start, end int, found bool) {
+	for i, token := range args {
+		if token == "--userns" {
+			if i+1 < len(args) {
+				return args[i+1], i, i + 2, true
+			}
+			return "", i, i + 1, true
+		}
+		if strings.HasPrefix(token, "--userns=") {
+			return strings.TrimPrefix(token, "--userns="), i, i + 1, true
+		}
+	}
+	return "", 0, 0, false
+}
+
+func StripUserns(args []string, start, end int) []string {
+	out := make([]string, 0, len(args)-(end-start))
+	out = append(out, args[:start]...)
+	out = append(out, args[end:]...)
+	return out
+}
+
+func OuterRunArgs(env *Env, uidmaps, gidmaps []string) []string {
+	args := make([]string, 0, 6+2*len(uidmaps)+2*len(gidmaps))
+	if SELinuxEnabled(env) {
+		args = append(args, "--security-opt", "label=disable")
+	}
+	args = append(args,
+		"--device", DefaultFuseDevice,
+		"-v", env.Store+":"+SharedStorePath+env.StoreOpts,
+	)
 	for _, m := range uidmaps {
 		args = append(args, "--uidmap", m)
 	}

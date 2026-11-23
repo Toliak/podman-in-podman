@@ -15,7 +15,7 @@ def binaries(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for name in ("pinp-e", "pinp-i"):
         result: subprocess.CompletedProcess[str] = subprocess.run(
             ["go", "build", "-o", str(out / name), f"./cmd/{name}"],
-            cwd=ROOT,
+            cwd=ROOT / "pinp",
             capture_output=True,
             text=True,
             check=False,

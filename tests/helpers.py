@@ -57,6 +57,8 @@ def base_env(tmp_path: Path, *, sparse: bool = False) -> dict[str, str]:
         "PINP_SUBGID_FILE": str(tmp_path / "subgid"),
         "PINP_STORE": str(tmp_path / "store"),
         "PINP_HOME": str(home),
+        "PINP_SELINUX": "auto",
+        "PINP_SELINUXFS": str(tmp_path / "selinuxfs"),
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(home),
     }

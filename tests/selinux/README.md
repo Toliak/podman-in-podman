@@ -26,13 +26,14 @@ Only small files: `bin/pinp-e`, `bin/pinp-i`, the scripts, and `guest/image/` (~
 | `prepare-image.sh` | download + checksum + baked overlay + kernel/initrd extraction |
 | `prepare-guest.sh` | boot once, run `guest/setup.sh`, freeze as `prepared.qcow2` |
 | `boot.sh` | `start [overlay.qcow2] \| stop \| status` |
-| `run-matrix.sh` | six cases on fresh COW overlays, collect artifacts |
+| `run-matrix.sh` | eight cases on fresh COW overlays, collect artifacts |
 | `summarize.sh` | render `RESULTS.md` from collected artifacts |
 | `guest/setup.sh` | dnf packages, `devuser` + subuids, build/pull images, SELinux assertions |
 | `guest/run-case.sh` | one outer `podman run` + inner checks |
 | `guest/collect-avc.sh` | `ausearch`, `journalctl -k`, `audit2allow` |
 | `guest/image/` | `pinp-outer` build context |
 | `results/` | generated per-case evidence (not committed) |
+| `test_matrix.py` | opt-in pytest entry point (marker `selinux`, gated by `PINP_SELINUX_TEST=1`); runs `run-matrix.sh` via a subprocess |
 
 Artifacts live in `${PINP_SELINUX_CACHE:-<repo>/.selinux-cache}` — project-local, on-disk (not a tmpfs), and `PINP_SELINUX_CACHE` can override it. `/tmp` is deliberately avoided because it is a RAM-backed tmpfs on this host.
 
@@ -51,7 +52,15 @@ bash tests/selinux/boot.sh stop
 make selinux-test
 ```
 
-`make selinux-test` runs the whole matrix and then `summarize.sh`. Remove `${CACHE_DIR}/prepared.qcow2` to force a fresh guest setup; remove `${CACHE_DIR}/baked.qcow2` to force re-baking.
+`make selinux-test` now delegates to pytest (it builds the binaries, then runs `test_matrix.py` under the `selinux` marker with `PINP_SELINUX_TEST=1`), which runs the whole matrix via `run-matrix.sh` and then `summarize.sh`. You can also invoke the opt-in test directly:
+
+```
+PINP_SELINUX_TEST=1 .venv/bin/python -m pytest -q -s -c tests/pyproject.toml -m selinux tests/selinux/test_matrix.py
+```
+
+Without `PINP_SELINUX_TEST=1` the test skips, so the default suite stays fast and green. The harness is now pytest-executable per the testing policy in `AGENTS.md`, while the bash scripts remain the harness body.
+
+Remove `${CACHE_DIR}/prepared.qcow2` to force a fresh guest setup; remove `${CACHE_DIR}/baked.qcow2` to force re-baking.
 
 ## Case matrix
 

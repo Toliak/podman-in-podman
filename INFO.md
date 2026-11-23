@@ -2,7 +2,7 @@
 
 What is needed on the **host** and inside the **outer container** to run a nested
 rootless podman (tested: Debian in Debian, `podman ... echo "hello world"`).
-Hints/configs live in `sloppatch/.dev/docker/`.
+Reference configs live in `tests/selinux/guest/image/`.
 
 ## The core idea
 
@@ -21,10 +21,12 @@ nested namespace usable.
   (e.g. `agentic:231072:65536`).
 - Usable `newuidmap` / `newgidmap` (setuid-root, or `cap_setuid`/`cap_setgid`
   file capabilities) to set up the outer user namespace.
-- Outer container run flags (see `.dev/docker/Makefile`):
+- Outer container run flags:
   - `--device /dev/fuse`
-  - `--security-opt label=disable`
-  - custom `--uidmap` / `--gidmap` (`PODMAN_RUN_MAP`): maps the container's user
+  - `--security-opt label=disable` — only on SELinux-enforcing hosts; a no-op
+    elsewhere. `pinp-e` injects it conditionally (`PINP_SELINUX=auto` probes
+    `/sys/fs/selinux`, `on`/`off` force it). See `TODO.md` findings.
+  - custom `--uidmap` / `--gidmap`: maps the container's user
     back to the host user, container root to a subuid, and exposes a wide range
     (`100000:...`) of intermediate IDs — do **not** unify uidmap and gidmap when
     UID != GID.
@@ -56,7 +58,7 @@ setcap cap_setuid+ep /usr/bin/newuidmap
 setcap cap_setgid+ep /usr/bin/newgidmap
 ```
 
-Config files from `.dev/docker/overlay/podman/`:
+Config files (see `tests/selinux/guest/image/`):
 - `/etc/containers/containers.conf` — `netns=host`, `ipcns=host`,
   `utsns=host`, `cgroupns=host`, `cgroups=disabled`, `log_driver=k8s-file`,
   `cgroup_manager=cgroupfs`, `runtime=crun`, `events_logger=file`.
@@ -71,7 +73,7 @@ Config files from `.dev/docker/overlay/podman/`:
 ## Running the inner container (L2)
 
 Run as the non-root user, with a `--uidmap` that fits the container's subuid
-ranges (see `.dev/docker/README.md`):
+ranges:
 ```
 podman run --rm --uidmap 0:0:1500 --uidmap 65534:1500:2 debian:trixie echo "hello world"
 ```

@@ -28,7 +28,7 @@ func run() error {
 		if env.Explain {
 			return pinp.Explain(env.Podman, args)
 		}
-		return pinp.Exec(env.Podman, args)
+		return pinp.Exec(env.Podman, args, env.Echo)
 	}
 	idx, err := pinp.FindSubcommand(args)
 	if err != nil {
@@ -42,8 +42,16 @@ func run() error {
 		return pinp.RunCheckCommand(env, args[idx+1:])
 	}
 	if sub == "run" || sub == "create" {
-		if conflicts := pinp.Conflicts(args[idx+1:]); len(conflicts) > 0 {
-			return fmt.Errorf("conflicting arguments already supplied: %s", strings.Join(conflicts, ", "))
+		tail := args[idx+1:]
+		if value, start, end, found := pinp.FindUserns(tail); found {
+			if value != "keep-id" {
+				return fmt.Errorf("conflicting arguments already supplied: --userns=%s (unsupported: pinp needs its own uid maps for nested podman); set PINP_PASSTHROUGH=1 to bypass injection", value)
+			}
+			tail = pinp.StripUserns(tail, start, end)
+			args = append(args[:idx+1:idx+1], tail...)
+		}
+		if conflicts := pinp.Conflicts(tail); len(conflicts) > 0 {
+			return fmt.Errorf("conflicting arguments already supplied: %s; set PINP_PASSTHROUGH=1 to bypass injection", strings.Join(conflicts, ", "))
 		}
 		args = pinp.InjectAt(args, idx, pinp.InnerRunArgs(env))
 	}
@@ -67,5 +75,5 @@ func run() error {
 			return fmt.Errorf("%d preflight check(s) failed; set PINP_SKIP_CHECKS=1 to bypass", report.Summary.Fail)
 		}
 	}
-	return pinp.Exec(env.Podman, args)
+	return pinp.Exec(env.Podman, args, env.Echo)
 }

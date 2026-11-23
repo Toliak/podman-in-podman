@@ -33,10 +33,13 @@ func Explain(podman string, args []string) error {
 	return enc.Encode(full)
 }
 
-func Exec(podman string, args []string) error {
+func Exec(podman string, args []string, echo bool) error {
 	path, err := ResolvePodman(podman)
 	if err != nil {
 		return err
+	}
+	if echo {
+		Echo(podman, args)
 	}
 	full := append([]string{filepath.Base(path)}, args...)
 	return syscall.Exec(path, full, os.Environ())
