@@ -1,0 +1,35 @@
+FROM debian:trixie
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        podman \
+        fuse-overlayfs \
+        uidmap \
+        crun \
+        slirp4netns \
+        libcap2-bin \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG USER_NAME=devuser
+ARG USER_UID=1002
+ARG USER_GID=1006
+
+RUN groupadd --gid "${USER_GID}" "${USER_NAME}" && \
+    useradd --uid "${USER_UID}" --gid "${USER_GID}" -m "${USER_NAME}" -s /bin/bash
+
+COPY etc/containers.conf /etc/containers/containers.conf
+COPY user/containers.conf user/storage.conf /home/${USER_NAME}/.config/containers/
+
+RUN printf '%s:100000:32768\n%s:1:%s\n' "${USER_NAME}" "${USER_NAME}" "$((USER_UID - 1))" > /etc/subuid && \
+    cp /etc/subuid /etc/subgid && \
+    chmod -s /usr/bin/newgidmap /usr/bin/newuidmap && \
+    setcap cap_setgid+ep /usr/bin/newgidmap && \
+    setcap cap_setuid+ep /usr/bin/newuidmap && \
+    chown -R "${USER_UID}:${USER_GID}" /home/${USER_NAME} && \
+    mkdir -p /var/lib/shared && \
+    chown -R "${USER_UID}:${USER_GID}" /var/lib/shared
+
+USER ${USER_NAME}
+WORKDIR /home/${USER_NAME}

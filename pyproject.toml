@@ -1,0 +1,24 @@
+[project]
+name = "pinp-tests"
+version = "0.1.0"
+description = "Black-box test suite for the pinp-e and pinp-i podman wrappers"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+norecursedirs = ["sloppatch", ".venv", "build", "dist"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", "sloppatch"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["helpers"]
