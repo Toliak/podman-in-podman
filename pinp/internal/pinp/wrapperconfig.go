@@ -37,6 +37,7 @@ type wrapperConfig struct {
 	} `toml:"host"`
 	L1 struct {
 		InnerUIDMaps *string `toml:"inner_uidmaps"`
+		ConfigArgs   *bool   `toml:"config_args"`
 	} `toml:"l1"`
 }
 

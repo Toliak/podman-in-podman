@@ -23,28 +23,29 @@ const (
 )
 
 type Env struct {
-	Podman        string
-	Echo          bool
-	Explain       bool
-	Passthrough   bool
-	SkipChecks    bool
-	UID           int
-	GID           int
-	User          string
-	SubUIDFile    string
-	SubGIDFile    string
-	Store         string
-	StoreOpts     string
-	FuseDevice    string
-	SharedStore   string
-	NewUIDMap     string
-	NewGIDMap     string
-	InnerMaps     []string
-	UsrShareDir   string
-	EtcDir        string
-	ConfigHome    string
-	SELinux       string
-	SELinuxFS     string
+	Podman           string
+	Echo             bool
+	Explain          bool
+	Passthrough      bool
+	SkipChecks       bool
+	UID              int
+	GID              int
+	User             string
+	SubUIDFile       string
+	SubGIDFile       string
+	Store            string
+	StoreOpts        string
+	FuseDevice       string
+	SharedStore      string
+	NewUIDMap        string
+	NewGIDMap        string
+	InnerMaps        []string
+	UsrShareDir      string
+	EtcDir           string
+	ConfigHome       string
+	SELinux          string
+	SELinuxFS        string
+	InjectConfigArgs bool
 }
 
 func boolEnv(name string) bool {
@@ -109,27 +110,28 @@ func LoadEnv() (*Env, error) {
 		return nil, fmt.Errorf("invalid PINP_SELINUX=%q: must be one of auto, on, off", selinux)
 	}
 	return &Env{
-		Podman:        strVal("PINP_PODMAN", cfg.Wrapper.Podman, "podman"),
-		Echo:          boolVal("PINP_ECHO", cfg.Wrapper.Echo, true),
-		Explain:       boolVal("PINP_EXPLAIN", cfg.Wrapper.Explain, false),
-		Passthrough:   boolVal("PINP_PASSTHROUGH", cfg.Wrapper.Passthrough, false),
-		SkipChecks:    boolVal("PINP_SKIP_CHECKS", cfg.Wrapper.SkipChecks, false),
-		UID:           uid,
-		GID:           gid,
-		User:          userName,
-		SubUIDFile:    strVal("PINP_SUBUID_FILE", cfg.Host.SubUIDFile, DefaultSubUIDFile),
-		SubGIDFile:    strVal("PINP_SUBGID_FILE", cfg.Host.SubGIDFile, DefaultSubGIDFile),
-		Store:         strVal("PINP_STORE", cfg.Host.Store, filepath.Join(home, ".local/share/containers/storage")),
-		StoreOpts:     strVal("PINP_STORE_OPTS", cfg.Host.StoreOpts, DefaultStoreOpts),
-		FuseDevice:    strVal("PINP_FUSE_DEVICE", cfg.Host.FuseDevice, DefaultFuseDevice),
-		SharedStore:   strVal("PINP_SHARED_STORE", cfg.Host.SharedStore, SharedStorePath),
-		NewUIDMap:     strVal("PINP_NEWUIDMAP", cfg.Host.NewUIDMap, DefaultNewUIDMap),
-		NewGIDMap:     strVal("PINP_NEWGIDMAP", cfg.Host.NewGIDMap, DefaultNewGIDMap),
-		InnerMaps:     strings.Fields(strVal("PINP_INNER_UIDMAPS", cfg.L1.InnerUIDMaps, DefaultInnerUIDMaps)),
-		UsrShareDir:   strVal("PINP_USR_SHARE_CONTAINERS", cfg.Host.UsrShareContainers, "/usr/share/containers"),
-		EtcDir:        strVal("PINP_ETC_CONTAINERS", cfg.Host.EtcContainers, "/etc/containers"),
-		SELinux:       selinux,
-		SELinuxFS:     strVal("PINP_SELINUXFS", cfg.Host.SELinuxFS, "/sys/fs/selinux"),
-		ConfigHome:    configHome,
+		Podman:           strVal("PINP_PODMAN", cfg.Wrapper.Podman, "podman"),
+		Echo:             boolVal("PINP_ECHO", cfg.Wrapper.Echo, true),
+		Explain:          boolVal("PINP_EXPLAIN", cfg.Wrapper.Explain, false),
+		Passthrough:      boolVal("PINP_PASSTHROUGH", cfg.Wrapper.Passthrough, false),
+		SkipChecks:       boolVal("PINP_SKIP_CHECKS", cfg.Wrapper.SkipChecks, false),
+		UID:              uid,
+		GID:              gid,
+		User:             userName,
+		SubUIDFile:       strVal("PINP_SUBUID_FILE", cfg.Host.SubUIDFile, DefaultSubUIDFile),
+		SubGIDFile:       strVal("PINP_SUBGID_FILE", cfg.Host.SubGIDFile, DefaultSubGIDFile),
+		Store:            strVal("PINP_STORE", cfg.Host.Store, filepath.Join(home, ".local/share/containers/storage")),
+		StoreOpts:        strVal("PINP_STORE_OPTS", cfg.Host.StoreOpts, DefaultStoreOpts),
+		FuseDevice:       strVal("PINP_FUSE_DEVICE", cfg.Host.FuseDevice, DefaultFuseDevice),
+		SharedStore:      strVal("PINP_SHARED_STORE", cfg.Host.SharedStore, SharedStorePath),
+		NewUIDMap:        strVal("PINP_NEWUIDMAP", cfg.Host.NewUIDMap, DefaultNewUIDMap),
+		NewGIDMap:        strVal("PINP_NEWGIDMAP", cfg.Host.NewGIDMap, DefaultNewGIDMap),
+		InnerMaps:        strings.Fields(strVal("PINP_INNER_UIDMAPS", cfg.L1.InnerUIDMaps, DefaultInnerUIDMaps)),
+		UsrShareDir:      strVal("PINP_USR_SHARE_CONTAINERS", cfg.Host.UsrShareContainers, "/usr/share/containers"),
+		EtcDir:           strVal("PINP_ETC_CONTAINERS", cfg.Host.EtcContainers, "/etc/containers"),
+		SELinux:          selinux,
+		SELinuxFS:        strVal("PINP_SELINUXFS", cfg.Host.SELinuxFS, "/sys/fs/selinux"),
+		ConfigHome:       configHome,
+		InjectConfigArgs: boolVal("PINP_CONFIG_ARGS", cfg.L1.ConfigArgs, true),
 	}, nil
 }

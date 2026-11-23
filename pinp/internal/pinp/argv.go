@@ -195,3 +195,38 @@ func InnerRunArgs(env *Env) []string {
 	}
 	return args
 }
+
+var flagAliases = map[string][]string{"--network": {"--net"}}
+
+func HasFlag(args []string, names ...string) bool {
+	for _, token := range args {
+		name := token
+		if idx := strings.IndexByte(token, '='); idx >= 0 {
+			name = token[:idx]
+		}
+		for _, n := range names {
+			if name == n {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ConfigArgs(cfg *EffectiveConfig, args []string, sub string) []string {
+	var out []string
+	for _, s := range ConfigSettings {
+		if !s.Build && sub == "build" {
+			continue
+		}
+		if s.Get(cfg) != "" {
+			continue
+		}
+		names := append([]string{s.Flags[0]}, flagAliases[s.Flags[0]]...)
+		if HasFlag(args, names...) {
+			continue
+		}
+		out = append(out, s.Flags...)
+	}
+	return out
+}

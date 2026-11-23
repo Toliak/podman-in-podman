@@ -53,7 +53,17 @@ func run() error {
 		if conflicts := pinp.Conflicts(tail); len(conflicts) > 0 {
 			return fmt.Errorf("conflicting arguments already supplied: %s; set PINP_PASSTHROUGH=1 to bypass injection", strings.Join(conflicts, ", "))
 		}
-		args = pinp.InjectAt(args, idx, pinp.InnerRunArgs(env))
+		var extra []string
+		if cfg, err := pinp.LoadEffectiveConfig(env); err == nil && env.InjectConfigArgs {
+			extra = append(extra, pinp.ConfigArgs(cfg, args, sub)...)
+		}
+		extra = append(extra, pinp.InnerRunArgs(env)...)
+		args = pinp.InjectAt(args, idx, extra)
+	}
+	if sub == "build" && idx >= 0 {
+		if cfg, err := pinp.LoadEffectiveConfig(env); err == nil && env.InjectConfigArgs {
+			args = pinp.InjectAt(args, idx, pinp.ConfigArgs(cfg, args, "build"))
+		}
 	}
 	if env.Explain {
 		if sub == "build" {

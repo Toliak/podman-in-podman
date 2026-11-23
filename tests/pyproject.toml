@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "Black-box test suite for the pinp-e and pinp-i podman wrappers"
 requires-python = ">=3.10"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.uv]
+package = false
 
 [tool.pytest.ini_options]
 testpaths = ["."]

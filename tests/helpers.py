@@ -48,6 +48,31 @@ def base_env(tmp_path: Path, *, sparse: bool = False) -> dict[str, str]:
         content = "tester:231072:65536\n"
     (tmp_path / "subuid").write_text(content)
     (tmp_path / "subgid").write_text(content)
+    usr = tmp_path / "usr"
+    etc = tmp_path / "etc"
+    xdg = tmp_path / "xdg"
+    containers = xdg / "containers"
+    for directory in (usr, etc, xdg, containers):
+        directory.mkdir(parents=True, exist_ok=True)
+    (etc / "containers.conf").write_text(
+        "[containers]\n"
+        'netns="host"\n'
+        'ipcns="host"\n'
+        'utsns="host"\n'
+        'cgroupns="host"\n'
+        'pidns="host"\n'
+        'cgroups="enabled"\n'
+        'log_driver="k8s-file"\n'
+        "[engine]\n"
+        'runtime="crun"\n'
+        'cgroup_manager="cgroupfs"\n'
+        'events_logger="file"\n'
+    )
+    (etc / "storage.conf").write_text(
+        '[storage]\ndriver="overlay"\n'
+        '[storage.options]\nadditionalimagestores=["/var/lib/shared"]\n'
+        '[storage.options.overlay]\nmount_program="/usr/bin/fuse-overlayfs"\n'
+    )
     return {
         "PINP_EXPLAIN": "1",
         "PINP_UID": "1002",
@@ -61,7 +86,20 @@ def base_env(tmp_path: Path, *, sparse: bool = False) -> dict[str, str]:
         "PINP_SELINUXFS": str(tmp_path / "selinuxfs"),
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(home),
+        "PINP_USR_SHARE_CONTAINERS": str(usr),
+        "PINP_ETC_CONTAINERS": str(etc),
+        "XDG_CONFIG_HOME": str(home / ".config"),
     }
+
+
+def unset_config_env(tmp_path: Path) -> dict[str, str]:
+    env = base_env(tmp_path)
+    empty = tmp_path / "empty-config"
+    for name in ("PINP_USR_SHARE_CONTAINERS", "PINP_ETC_CONTAINERS", "XDG_CONFIG_HOME"):
+        d = empty / name.lower()
+        d.mkdir(parents=True, exist_ok=True)
+        env[name] = str(d)
+    return env
 
 
 def run_wrapper(

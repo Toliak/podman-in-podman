@@ -49,6 +49,29 @@ type EffectiveConfig struct {
 	Sources    []string
 }
 
+type ConfigSetting struct {
+	Key   string
+	Want  string
+	Flags []string
+	Build bool
+	Get   func(*EffectiveConfig) string
+}
+
+var ConfigSettings = []ConfigSetting{
+	{Key: "netns", Want: "host", Flags: []string{"--network", "host"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Containers.NetNS }},
+	{Key: "ipcns", Want: "host", Flags: []string{"--ipc", "host"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Containers.IPCNs }},
+	{Key: "utsns", Want: "host", Flags: []string{"--uts", "host"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Containers.UTSNs }},
+	{Key: "cgroupns", Want: "host", Flags: []string{"--cgroupns", "host"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Containers.CgroupNS }},
+	{Key: "pidns", Want: "host", Flags: []string{"--pid", "host"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Containers.PIDNS }},
+	{Key: "cgroups", Want: "enabled", Flags: []string{"--cgroups", "enabled"}, Build: false, Get: func(c *EffectiveConfig) string { return c.Containers.Containers.Cgroups }},
+	{Key: "log_driver", Want: "k8s-file", Flags: []string{"--log-driver", "k8s-file"}, Build: false, Get: func(c *EffectiveConfig) string { return c.Containers.Containers.LogDriver }},
+	{Key: "runtime", Want: "crun", Flags: []string{"--runtime", "crun"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Engine.Runtime }},
+	{Key: "cgroup_manager", Want: "cgroupfs", Flags: []string{"--cgroup-manager", "cgroupfs"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Engine.CgroupManager }},
+	{Key: "events_logger", Want: "file", Flags: []string{"--events-backend", "file"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Engine.EventsLogger }},
+	{Key: "driver", Want: "overlay", Flags: []string{"--storage-driver", "overlay"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Storage.Storage.Driver }},
+	{Key: "mount_program", Want: "/usr/bin/fuse-overlayfs", Flags: []string{"--storage-opt", "overlay.mount_program=/usr/bin/fuse-overlayfs"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Storage.Storage.Options.Overlay.MountProgram }},
+}
+
 func loadContainersInto(path string, dst *ContainersConfig) error {
 	var fresh ContainersConfig
 	md, err := toml.DecodeFile(path, &fresh)

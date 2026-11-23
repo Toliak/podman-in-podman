@@ -58,16 +58,17 @@ func (r *Report) addPath(name, path string, wantExecutable bool) {
 	r.add(name, StatusPass, path)
 }
 
-func (r *Report) expect(name, got, want string) {
+func (r *Report) expectSetting(cfg *EffectiveConfig, s ConfigSetting) {
+	got := s.Get(cfg)
 	if got == "" {
-		r.add("config "+name, StatusFail, "not set")
+		r.add("config "+s.Key, StatusWarn, "not set; pinp-i injects "+strings.Join(s.Flags, " "))
 		return
 	}
-	if got != want {
-		r.add("config "+name, StatusWarn, fmt.Sprintf("%q, expected %q", got, want))
+	if got != s.Want {
+		r.add("config "+s.Key, StatusWarn, fmt.Sprintf("%q, expected %q", got, s.Want))
 		return
 	}
-	r.add("config "+name, StatusPass, got)
+	r.add("config "+s.Key, StatusPass, got)
 }
 
 func hasString(items []string, want string) bool {
@@ -201,15 +202,9 @@ func RunChecks(env *Env) Report {
 		r.add("effective config", StatusFail, cfgErr.Error())
 	} else {
 		r.add("effective config", StatusPass, strings.Join(cfg.Sources, ", "))
-		r.expect("netns", cfg.Containers.Containers.NetNS, "host")
-		r.expect("ipcns", cfg.Containers.Containers.IPCNs, "host")
-		r.expect("utsns", cfg.Containers.Containers.UTSNs, "host")
-		r.expect("cgroupns", cfg.Containers.Containers.CgroupNS, "host")
-		r.expect("pidns", cfg.Containers.Containers.PIDNS, "host")
-		r.expect("cgroups", cfg.Containers.Containers.Cgroups, "enabled")
-		r.expect("runtime", cfg.Containers.Engine.Runtime, "crun")
-		r.expect("driver", cfg.Storage.Storage.Driver, "overlay")
-		r.expect("mount_program", cfg.Storage.Storage.Options.Overlay.MountProgram, "/usr/bin/fuse-overlayfs")
+		for _, s := range ConfigSettings {
+			r.expectSetting(cfg, s)
+		}
 		if cfg.Containers.Containers.UserNS != "" {
 			r.add("config userns", StatusWarn, fmt.Sprintf("containers.conf userns=%q would collide with injected --uidmap and is silently overridden", cfg.Containers.Containers.UserNS))
 		}
@@ -219,7 +214,7 @@ func RunChecks(env *Env) Report {
 		if hasString(cfg.Storage.Storage.Options.AdditionalImageStores, SharedStorePath) {
 			r.add("config additionalimagestores", StatusPass, SharedStorePath)
 		} else {
-			r.add("config additionalimagestores", StatusFail, fmt.Sprintf("%v, missing %s", cfg.Storage.Storage.Options.AdditionalImageStores, SharedStorePath))
+			r.add("config additionalimagestores", StatusWarn, "not set; no podman CLI equivalent; mount /var/lib/shared in L1")
 		}
 		mountProgram := cfg.Storage.Storage.Options.Overlay.MountProgram
 		if mountProgram == "" {

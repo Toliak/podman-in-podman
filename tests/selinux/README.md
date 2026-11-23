@@ -55,7 +55,7 @@ make selinux-test
 `make selinux-test` now delegates to pytest (it builds the binaries, then runs `test_matrix.py` under the `selinux` marker with `PINP_SELINUX_TEST=1`), which runs the whole matrix via `run-matrix.sh` and then `summarize.sh`. You can also invoke the opt-in test directly:
 
 ```
-PINP_SELINUX_TEST=1 .venv/bin/python -m pytest -q -s -c tests/pyproject.toml -m selinux tests/selinux/test_matrix.py
+PINP_SELINUX_TEST=1 uv run --project tests pytest -q -s -c tests/pyproject.toml -m selinux tests/selinux/test_matrix.py
 ```
 
 Without `PINP_SELINUX_TEST=1` the test skips, so the default suite stays fast and green. The harness is now pytest-executable per the testing policy in `AGENTS.md`, while the bash scripts remain the harness body.

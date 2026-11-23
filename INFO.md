@@ -19,8 +19,9 @@ nested namespace usable.
 - `/dev/fuse` available.
 - `/etc/subuid` / `/etc/subgid`: the user owns **at least ~64k** subordinate IDs
   (e.g. `agentic:231072:65536`).
-- Usable `newuidmap` / `newgidmap` (setuid-root, or `cap_setuid`/`cap_setgid`
-  file capabilities) to set up the outer user namespace.
+- Usable `newuidmap` / `newgidmap` (setuid-root **or** `cap_setuid`/`cap_setgid`
+  file capabilities) to set up the outer user namespace. This is the **host** rule;
+  inside L1 the helpers must instead be non-setuid with file caps (see below).
 - Outer container run flags:
   - `--device /dev/fuse`
   - `--security-opt label=disable` — only on SELinux-enforcing hosts; a no-op
@@ -58,6 +59,10 @@ setcap cap_setuid+ep /usr/bin/newuidmap
 setcap cap_setgid+ep /usr/bin/newgidmap
 ```
 
+`pinp-i check` enforces exactly this (L1-only): it FAILs when either helper is
+setuid-root or lacks `cap_setuid=ep` / `cap_setgid=ep` file caps. On the host
+either setuid-root or file caps work, so `pinp-e` does not apply this rule.
+
 Config files (see `tests/selinux/guest/image/`):
 - `/etc/containers/containers.conf` — `netns=host`, `ipcns=host`,
   `utsns=host`, `cgroupns=host`, `cgroups=disabled`, `log_driver=k8s-file`,
@@ -67,6 +72,20 @@ Config files (see `tests/selinux/guest/image/`):
 - `~/.config/containers/storage.conf` — `driver=overlay`,
   `additionalimagestores=["/var/lib/shared"]`,
   `mount_program=/usr/bin/fuse-overlayfs`, `mountopt="nodev,fsync=0"`.
+
+These keys are optional now: `pinp-i` injects the equivalent podman flags on
+`run`/`create`/`build` whenever the merged effective config leaves a key unset
+(`--network host`, `--ipc host`, `--uts host`, `--cgroupns host`, `--pid host`,
+`--cgroups enabled`, `--log-driver k8s-file`, `--runtime crun`,
+`--cgroup-manager cgroupfs`, `--events-backend file`, `--storage-driver overlay`,
+`--storage-opt overlay.mount_program=...`). `podman build` gets the same list minus
+`--cgroups` / `--log-driver`. The full mapping lives in
+`pinp/internal/pinp/config.go`; `PINP_CONFIG_ARGS=0` disables it. Unset keys are
+`WARN` in `pinp-i check`, not `FAIL`.
+
+`additionalimagestores` has no CLI equivalent — `podman --imagestore` redirects
+*newly pulled* image writes, it does not add a read-only store — so it still needs
+`storage.conf` and the `/var/lib/shared` mount.
 
 `/var/lib/shared` mount point must exist and be owned by the user.
 

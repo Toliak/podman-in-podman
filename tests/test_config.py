@@ -53,7 +53,7 @@ def test_containers_conf_ignores_other_main_files(
     env["CONTAINERS_CONF"] = str(single)
     checks = check_map(binaries, env)
     assert checks["config cgroups"]["status"] == "pass"
-    assert checks["config netns"]["status"] == "fail"
+    assert checks["config netns"]["status"] == "warn"
 
 
 def test_dropins_are_sorted_and_override_main(
