@@ -60,6 +60,6 @@ def test_no_echo_on_explain(binaries: Path, tmp_path: Path) -> None:
 
 def test_no_echo_on_check(binaries: Path, stub_podman: Path, tmp_path: Path) -> None:
     env = _exec_env(tmp_path, stub_podman)
-    result = run_wrapper(binaries, "pinp-i", ["check", "--json", "--no-fail"], env)
+    result = run_wrapper(binaries, "pinp-i", ["pinp-check", "--json", "--no-fail"], env)
     assert result.returncode == 0, result.stderr
     assert "podman" not in result.stderr

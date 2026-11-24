@@ -20,6 +20,9 @@ const (
 	DefaultSubGIDFile   = "/etc/subgid"
 	DefaultNewUIDMap    = "/usr/bin/newuidmap"
 	DefaultNewGIDMap    = "/usr/bin/newgidmap"
+	DefaultUIDMapFile   = "/proc/self/uid_map"
+	DefaultGIDMapFile   = "/proc/self/gid_map"
+	DefaultSetcap       = "setcap"
 )
 
 type Env struct {
@@ -39,6 +42,9 @@ type Env struct {
 	SharedStore      string
 	NewUIDMap        string
 	NewGIDMap        string
+	UIDMapFile       string
+	GIDMapFile       string
+	Setcap           string
 	InnerMaps        []string
 	UsrShareDir      string
 	EtcDir           string
@@ -126,6 +132,9 @@ func LoadEnv() (*Env, error) {
 		SharedStore:      strVal("PINP_SHARED_STORE", cfg.Host.SharedStore, SharedStorePath),
 		NewUIDMap:        strVal("PINP_NEWUIDMAP", cfg.Host.NewUIDMap, DefaultNewUIDMap),
 		NewGIDMap:        strVal("PINP_NEWGIDMAP", cfg.Host.NewGIDMap, DefaultNewGIDMap),
+		UIDMapFile:       strVal("PINP_UID_MAP_FILE", cfg.Host.UIDMapFile, DefaultUIDMapFile),
+		GIDMapFile:       strVal("PINP_GID_MAP_FILE", cfg.Host.GIDMapFile, DefaultGIDMapFile),
+		Setcap:           strVal("PINP_SETCAP", cfg.Host.Setcap, DefaultSetcap),
 		InnerMaps:        strings.Fields(strVal("PINP_INNER_UIDMAPS", cfg.L1.InnerUIDMaps, DefaultInnerUIDMaps)),
 		UsrShareDir:      strVal("PINP_USR_SHARE_CONTAINERS", cfg.Host.UsrShareContainers, "/usr/share/containers"),
 		EtcDir:           strVal("PINP_ETC_CONTAINERS", cfg.Host.EtcContainers, "/etc/containers"),

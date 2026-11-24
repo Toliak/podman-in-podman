@@ -75,7 +75,7 @@ Remove `${CACHE_DIR}/prepared.qcow2` to force a fresh guest setup; remove `${CAC
 | G | `label=disable` | `:z` | control with relabel |
 | H | `label=disable` | `:Z` | control with private label |
 
-Per case: `ls -Z` before/after the two bind sources, `podman image ls` `R/O=true` in L1, inner `echo "hello world"`, inner `podman build`, inner `pinp-i check --json --no-fail`, graph driver/runtime, and AVC reports.
+Per case: `ls -Z` before/after the two bind sources, `podman image ls` `R/O=true` in L1, inner `echo "hello world"`, inner `podman build`, inner `pinp-i pinp-check --json --no-fail`, graph driver/runtime, and AVC reports.
 
 ## Critical gotchas
 

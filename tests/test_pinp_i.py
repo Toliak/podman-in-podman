@@ -88,7 +88,7 @@ def test_check_json_structure(binaries: Path, stub_podman: Path, tmp_path: Path)
     env = base_env(tmp_path)
     env["PINP_EXPLAIN"] = "0"
     env["PINP_PODMAN"] = str(stub_podman)
-    result = run_wrapper(binaries, "pinp-i", ["check", "--json", "--no-fail"], env)
+    result = run_wrapper(binaries, "pinp-i", ["pinp-check", "--json", "--no-fail"], env)
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
     assert set(data) == {"checks", "summary"}
@@ -109,7 +109,7 @@ def test_check_text_output(binaries: Path, stub_podman: Path, tmp_path: Path) ->
     env = base_env(tmp_path)
     env["PINP_EXPLAIN"] = "0"
     env["PINP_PODMAN"] = str(stub_podman)
-    result = run_wrapper(binaries, "pinp-i", ["check", "--no-fail"], env)
+    result = run_wrapper(binaries, "pinp-i", ["pinp-check", "--no-fail"], env)
     assert result.returncode == 0, result.stderr
     assert "config cgroups" in result.stdout
     assert "pass" in result.stdout.lower()
@@ -119,17 +119,45 @@ def test_check_strict_fails_on_warnings(binaries: Path, stub_podman: Path, tmp_p
     env = base_env(tmp_path)
     env["PINP_EXPLAIN"] = "0"
     env["PINP_PODMAN"] = str(stub_podman)
-    result = run_wrapper(binaries, "pinp-i", ["check", "--json", "--strict"], env)
+    result = run_wrapper(binaries, "pinp-i", ["pinp-check", "--json", "--strict"], env)
     assert result.returncode != 0
 
 
 def test_check_only_filters(binaries: Path, stub_podman: Path, tmp_path: Path) -> None:
     env = config_env(tmp_path, stub_podman)
     result = run_wrapper(
-        binaries, "pinp-i", ["check", "--json", "--no-fail", "--only", "config cgroups"], env
+        binaries, "pinp-i", ["pinp-check", "--json", "--no-fail", "--only", "config cgroups"], env
     )
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
     assert len(data["checks"]) == 1
     assert data["checks"][0]["name"] == "config cgroups"
     assert data["summary"] == {"pass": 1, "warn": 0, "fail": 0}
+
+
+def test_bare_check_is_forwarded_to_podman(binaries: Path, tmp_path: Path) -> None:
+    env = base_env(tmp_path)  # PINP_EXPLAIN=1
+    result = run_wrapper(binaries, "pinp-i", ["check", "--json", "--no-fail"], env)
+    assert result.returncode == 0, result.stderr
+    # bare "check" is a clean pass-through, never pinp's preflight report
+    assert explained_argv(result) == ["podman", "check", "--json", "--no-fail"]
+
+
+def test_unknown_pinp_subcommand_is_rejected(binaries: Path, tmp_path: Path) -> None:
+    env = base_env(tmp_path)
+    result = run_wrapper(binaries, "pinp-i", ["pinp-frobnicate"], env)
+    assert result.returncode != 0
+    assert "unknown pinp subcommand" in result.stderr
+    assert "pinp-check" in result.stderr
+
+
+def test_pinp_check_dispatched_even_in_passthrough(
+    binaries: Path, stub_podman: Path, tmp_path: Path
+) -> None:
+    env = base_env(tmp_path)
+    env["PINP_EXPLAIN"] = "0"
+    env["PINP_PODMAN"] = str(stub_podman)
+    env["PINP_PASSTHROUGH"] = "1"
+    result = run_wrapper(binaries, "pinp-i", ["pinp-check", "--json", "--no-fail"], env)
+    assert result.returncode == 0, result.stderr
+    assert "checks" in json.loads(result.stdout)

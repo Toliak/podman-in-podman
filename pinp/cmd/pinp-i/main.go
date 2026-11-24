@@ -24,22 +24,33 @@ func run() error {
 		return err
 	}
 	args := os.Args[1:]
-	if env.Passthrough {
-		if env.Explain {
-			return pinp.Explain(env.Podman, args)
-		}
-		return pinp.Exec(env.Podman, args, env.Echo)
-	}
 	idx, err := pinp.FindSubcommand(args)
-	if err != nil {
+	if err != nil && !env.Passthrough {
 		return err
 	}
 	sub := ""
 	if idx >= 0 {
 		sub = args[idx]
 	}
-	if sub == "check" {
+
+	// pinp-only subcommands are dispatched before the passthrough short-circuit
+	// so PINP_PASSTHROUGH=1 still reaches them. They never inject argv, exec
+	// podman, or emit the PINP_ECHO line. The pinp- prefix is reserved: a typo
+	// is rejected with a clear error rather than forwarded to podman.
+	switch pinp.PinpCommand(sub) {
+	case pinp.CommandCheck:
 		return pinp.RunCheckCommand(env, args[idx+1:])
+	case pinp.CommandPrepare:
+		return pinp.RunPrepareCommand(env, args[idx+1:])
+	}
+	if pinp.IsReservedPinpName(sub) {
+		return fmt.Errorf("unknown pinp subcommand %q; known commands: %s", sub, strings.Join(pinp.KnownPinpCommands(), ", "))
+	}
+	if env.Passthrough {
+		if env.Explain {
+			return pinp.Explain(env.Podman, args)
+		}
+		return pinp.Exec(env.Podman, args, env.Echo)
 	}
 	if sub == "run" || sub == "create" {
 		tail := args[idx+1:]

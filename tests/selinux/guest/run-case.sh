@@ -52,7 +52,7 @@ if [[ "$(<"${OUT}/run.rc.txt")" == "0" ]]; then
   podman exec "$CNAME" podman run --rm --uidmap 0:0:1500 --uidmap 65534:1500:2 docker.io/library/debian:trixie echo 'hello world' > "$OUT/hello.txt" 2>&1
   printf '%s\n' "$?" > "$OUT/hello.rc.txt"
   podman cp /home/devuser/bin/pinp-i "${CNAME}:/tmp/pinp-i" >/dev/null 2>&1 || true
-  podman exec "$CNAME" /tmp/pinp-i check --json --no-fail > "$OUT/check.json" 2>&1 || true
+  podman exec "$CNAME" /tmp/pinp-i pinp-check --json --no-fail > "$OUT/check.json" 2>&1 || true
   podman exec "$CNAME" podman build -t pinp-build /opt/workdir/build > "$OUT/build.txt" 2>&1
   printf '%s\n' "$?" > "$OUT/build.rc.txt"
 else

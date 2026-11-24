@@ -12,6 +12,7 @@ var wrapperEnvKeys = []string{
 	"PINP_USER", "PINP_SUBUID_FILE", "PINP_SUBGID_FILE", "PINP_STORE",
 	"PINP_STORE_OPTS", "PINP_FUSE_DEVICE", "PINP_SHARED_STORE",
 	"PINP_NEWUIDMAP", "PINP_NEWGIDMAP", "PINP_INNER_UIDMAPS",
+	"PINP_UID_MAP_FILE", "PINP_GID_MAP_FILE", "PINP_SETCAP",
 	"PINP_USR_SHARE_CONTAINERS", "PINP_ETC_CONTAINERS", "PINP_HOME",
 	"PINP_SELINUX", "PINP_SELINUXFS", "XDG_CONFIG_HOME", "HOME",
 }
@@ -71,6 +72,12 @@ func TestLoadEnvDefaults(t *testing.T) {
 	if env.UID != 1002 || env.GID != 1006 {
 		t.Errorf("uid/gid = %d/%d, want 1002/1006", env.UID, env.GID)
 	}
+	if env.UIDMapFile != DefaultUIDMapFile || env.GIDMapFile != DefaultGIDMapFile {
+		t.Errorf("id-map file defaults = %q/%q, want %q/%q", env.UIDMapFile, env.GIDMapFile, DefaultUIDMapFile, DefaultGIDMapFile)
+	}
+	if env.Setcap != DefaultSetcap {
+		t.Errorf("Setcap default = %q, want %q", env.Setcap, DefaultSetcap)
+	}
 }
 
 func TestLoadEnvConfigAndEnvPrecedence(t *testing.T) {
@@ -92,6 +99,9 @@ gid = 2222
 user = "cfg-user"
 store = "/cfg/store"
 store_opts = ":z"
+uid_map_file = "/cfg/uid_map"
+gid_map_file = "/cfg/gid_map"
+setcap = "/cfg/setcap"
 selinux = "on"
 selinuxfs = "/cfg/selinuxfs"
 [l1]
@@ -121,6 +131,9 @@ inner_uidmaps = "0:0:10 65534:10:2"
 		{"User", env.User, "cfg-user"},
 		{"Store", env.Store, "/cfg/store"},
 		{"StoreOpts", env.StoreOpts, ":z"},
+		{"UIDMapFile", env.UIDMapFile, "/cfg/uid_map"},
+		{"GIDMapFile", env.GIDMapFile, "/cfg/gid_map"},
+		{"Setcap", env.Setcap, "/cfg/setcap"},
 		{"SELinux", env.SELinux, "on"},
 		{"SELinuxFS", env.SELinuxFS, "/cfg/selinuxfs"},
 	}

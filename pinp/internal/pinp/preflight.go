@@ -91,6 +91,18 @@ func formatRanges(ranges []Range) string {
 	return strings.Join(parts, " ")
 }
 
+func sameRanges(a, b []Range) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func BuildSpikeHint(uidRanges, gidRanges []Range) string {
 	return strings.Join([]string{
 		"pinp-i build: sparse subordinate ID ranges detected; build handling is intentionally not implemented yet.",
@@ -270,10 +282,37 @@ func RunChecks(env *Env) Report {
 	} else {
 		r.add("unprivileged_userns_clone", StatusWarn, "not present")
 	}
-	if raw, err := os.ReadFile("/proc/self/uid_map"); err == nil {
-		r.add("uid_map", StatusPass, strings.TrimSpace(string(raw)))
-	} else {
-		r.add("uid_map", StatusWarn, err.Error())
+	for _, idmap := range []struct{ name, path string }{
+		{"uid_map", env.UIDMapFile},
+		{"gid_map", env.GIDMapFile},
+	} {
+		raw, err := os.ReadFile(idmap.path)
+		if err != nil {
+			r.add(idmap.name, StatusWarn, err.Error())
+			continue
+		}
+		r.add(idmap.name, StatusPass, strings.TrimSpace(string(raw)))
+	}
+	// Derived subordinate-ID info is meaningful only inside a nested L1 userns;
+	// on a host identity map there is nothing to compare, so stay quiet.
+	for _, c := range []struct {
+		label, mapFile, subFile string
+		ownID                   int
+	}{
+		{"subuid consistency", env.UIDMapFile, env.SubUIDFile, env.UID},
+		{"subgid consistency", env.GIDMapFile, env.SubGIDFile, env.GID},
+	} {
+		extents, err := ParseIDMapFile(c.mapFile)
+		if err != nil || IsHostIdentityMap(extents) {
+			continue
+		}
+		derived, _ := DeriveSubIDRanges(extents, c.ownID, 0)
+		actual, _ := ParseSubIDFile(c.subFile, env.User)
+		if !sameRanges(derived, actual) {
+			r.add(c.label, StatusWarn, fmt.Sprintf("%s has %s; derived from %s is %s; refresh with pinp-i pinp-prepare", c.subFile, formatRanges(actual), c.mapFile, formatRanges(derived)))
+		} else {
+			r.add(c.label, StatusPass, formatRanges(derived))
+		}
 	}
 	return r
 }

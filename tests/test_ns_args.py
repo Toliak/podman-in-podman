@@ -197,7 +197,7 @@ def test_check_unset_config_warns(binaries: Path, stub_podman: Path, tmp_path: P
     env["PINP_EXPLAIN"] = "0"
     env["PINP_PODMAN"] = str(stub_podman)
     result = run_wrapper(
-        binaries, "pinp-i", ["check", "--json", "--no-fail", "--only", "config netns"], env
+        binaries, "pinp-i", ["pinp-check", "--json", "--no-fail", "--only", "config netns"], env
     )
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
@@ -218,7 +218,7 @@ def test_check_additionalimagestores_warns(
     result = run_wrapper(
         binaries,
         "pinp-i",
-        ["check", "--json", "--no-fail", "--only", "config additionalimagestores"],
+        ["pinp-check", "--json", "--no-fail", "--only", "config additionalimagestores"],
         env,
     )
     assert result.returncode == 0, result.stderr
@@ -234,7 +234,7 @@ def test_check_fully_configured_passes(binaries: Path, stub_podman: Path, tmp_pa
     env["PINP_EXPLAIN"] = "0"
     env["PINP_PODMAN"] = str(stub_podman)
     result = run_wrapper(
-        binaries, "pinp-i", ["check", "--json", "--no-fail", "--only", "config netns"], env
+        binaries, "pinp-i", ["pinp-check", "--json", "--no-fail", "--only", "config netns"], env
     )
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)

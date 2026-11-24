@@ -21,7 +21,7 @@ func MaybeBuildSpike(env *Env) {
 }
 
 func RunCheckCommand(env *Env, args []string) error {
-	fs := pflag.NewFlagSet("pinp-i check", pflag.ContinueOnError)
+	fs := pflag.NewFlagSet("pinp-i pinp-check", pflag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	jsonOut := fs.Bool("json", false, "emit the report as JSON")
 	noFail := fs.Bool("no-fail", false, "always exit 0")

@@ -59,8 +59,28 @@ setcap cap_setuid+ep /usr/bin/newuidmap
 setcap cap_setgid+ep /usr/bin/newgidmap
 ```
 
-`pinp-i check` enforces exactly this (L1-only): it FAILs when either helper is
-setuid-root or lacks `cap_setuid=ep` / `cap_setgid=ep` file caps. On the host
+### Generating the files with `pinp-i pinp-prepare`
+
+Rather than hand-baking the sparse lines above, `pinp-i pinp-prepare` (alias
+`gen-sub`) derives `/etc/subuid` + `/etc/subgid` from the `ID-inside-ns` column
+of `/proc/self/uid_map` / `/proc/self/gid_map`. It drops the user's own-id
+extent, container id 0, and the nobody extent, keeping <= 5 extents; uid and
+gid are derived **separately** (host UID != GID). For the captured L1 map this
+yields `devuser:1:1001` + `devuser:100000:64531` (uid) and `devuser:1:1005` +
+`devuser:100000:64527` (gid). By default it only prints the two files and the
+cap commands (zero side effects); `--write` writes them, clears setuid **and
+setgid** on the helpers, and runs `setcap` (`PINP_SETCAP`). `--max-size 32768`
+reproduces the hand-baked `...:100000:32768` line. It refuses a host identity
+map ("not inside a nested userns").
+
+**`pinp-prepare` must run at L1 runtime** (entrypoint or `podman exec -u root`),
+not image build: `/proc/self/uid_map` only shows the 4-extent nested map once
+`pinp-e` has created L1. The SELinux L1 image keeps the hand-baked lines as a
+fallback; wiring the harness to `pinp-prepare --write` is deferred. Injection
+into `InnerRunArgs` stays static pending the offset-vs-absolute spike.
+
+`pinp-i pinp-check` enforces exactly this (L1-only): it FAILs when either helper
+is setuid-root or lacks `cap_setuid=ep` / `cap_setgid=ep` file caps. On the host
 either setuid-root or file caps work, so `pinp-e` does not apply this rule.
 
 Config files (see `tests/selinux/guest/image/`):
@@ -81,7 +101,7 @@ These keys are optional now: `pinp-i` injects the equivalent podman flags on
 `--storage-opt overlay.mount_program=...`). `podman build` gets the same list minus
 `--cgroups` / `--log-driver`. The full mapping lives in
 `pinp/internal/pinp/config.go`; `PINP_CONFIG_ARGS=0` disables it. Unset keys are
-`WARN` in `pinp-i check`, not `FAIL`.
+`WARN` in `pinp-i pinp-check`, not `FAIL`.
 
 `additionalimagestores` has no CLI equivalent — `podman --imagestore` redirects
 *newly pulled* image writes, it does not add a read-only store — so it still needs

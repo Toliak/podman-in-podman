@@ -8,7 +8,7 @@ from helpers import config_env, run_wrapper
 
 def check_map(binaries: Path, env: dict[str, str]) -> dict[str, dict[str, str]]:
     result = run_wrapper(
-        binaries, "pinp-i", ["check", "--json", "--no-fail", "--only", "config"], env
+        binaries, "pinp-i", ["pinp-check", "--json", "--no-fail", "--only", "config"], env
     )
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
@@ -35,7 +35,7 @@ def test_containers_conf_override_loaded_last(
     result = run_wrapper(
         binaries,
         "pinp-i",
-        ["check", "--json", "--no-fail", "--only", "config cgroups"],
+        ["pinp-check", "--json", "--no-fail", "--only", "config cgroups"],
         env,
     )
     assert result.returncode == 0, result.stderr

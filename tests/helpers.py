@@ -7,6 +7,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+UID_MAP_L1 = "0 1 1002\n1002 0 1\n65534 65534 2\n100000 1003 64531\n"
+GID_MAP_L1 = "0 1 1006\n1006 0 1\n65534 65534 2\n100000 1007 64527\n"
+HOST_IDENTITY_MAP = "0 0 4294967295\n"
+
 CANNED_INFO = {
     "host": {
         "arch": "amd64",
@@ -99,6 +103,38 @@ def unset_config_env(tmp_path: Path) -> dict[str, str]:
         d = empty / name.lower()
         d.mkdir(parents=True, exist_ok=True)
         env[name] = str(d)
+    return env
+
+
+def prepare_env(
+    tmp_path: Path, *, uid_map: str | None = None, gid_map: str | None = None
+) -> dict[str, str]:
+    env = base_env(tmp_path)
+    (tmp_path / "uid_map").write_text(uid_map if uid_map is not None else UID_MAP_L1)
+    (tmp_path / "gid_map").write_text(gid_map if gid_map is not None else GID_MAP_L1)
+    # gen-subuid / gen-subgid are left absent on purpose: --write creates them
+    # (never real /etc); default mode must leave them untouched.
+    for name in ("newuidmap", "newgidmap"):
+        (tmp_path / name).write_text("#!/bin/sh\nexit 0\n")
+        (tmp_path / name).chmod(0o755)
+    setcap_log = tmp_path / "setcap.log"
+    (tmp_path / "setcap").write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{setcap_log}"\nexit 0\n')
+    (tmp_path / "setcap").chmod(0o755)
+    marker = tmp_path / "podman-called"
+    (tmp_path / "podman-stub").write_text(f'#!/bin/sh\n: > "{marker}"\nexit 0\n')
+    (tmp_path / "podman-stub").chmod(0o755)
+    env.update(
+        {
+            "PINP_UID_MAP_FILE": str(tmp_path / "uid_map"),
+            "PINP_GID_MAP_FILE": str(tmp_path / "gid_map"),
+            "PINP_SUBUID_FILE": str(tmp_path / "gen-subuid"),
+            "PINP_SUBGID_FILE": str(tmp_path / "gen-subgid"),
+            "PINP_NEWUIDMAP": str(tmp_path / "newuidmap"),
+            "PINP_NEWGIDMAP": str(tmp_path / "newgidmap"),
+            "PINP_SETCAP": str(tmp_path / "setcap"),
+            "PINP_PODMAN": str(tmp_path / "podman-stub"),
+        }
+    )
     return env
 
 

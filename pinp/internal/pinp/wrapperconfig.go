@@ -30,6 +30,9 @@ type wrapperConfig struct {
 		SharedStore        *string `toml:"shared_store"`
 		NewUIDMap          *string `toml:"newuidmap"`
 		NewGIDMap          *string `toml:"newgidmap"`
+		UIDMapFile         *string `toml:"uid_map_file"`
+		GIDMapFile         *string `toml:"gid_map_file"`
+		Setcap             *string `toml:"setcap"`
 		UsrShareContainers *string `toml:"usr_share_containers"`
 		EtcContainers      *string `toml:"etc_containers"`
 		SELinux            *string `toml:"selinux"`

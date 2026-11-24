@@ -68,7 +68,7 @@ def test_config_userns_preflight_warns(binaries: Path, stub_podman: Path, tmp_pa
     override.write_text('[containers]\nuserns="keep-id"\n')
     env["CONTAINERS_CONF_OVERRIDE"] = str(override)
     result = run_wrapper(
-        binaries, "pinp-i", ["check", "--json", "--no-fail", "--only", "config userns"], env
+        binaries, "pinp-i", ["pinp-check", "--json", "--no-fail", "--only", "config userns"], env
     )
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
@@ -85,7 +85,10 @@ def test_env_podman_userns_preflight_warns(
     env = config_env(tmp_path, stub_podman)
     env["PODMAN_USERNS"] = "keep-id"
     result = run_wrapper(
-        binaries, "pinp-i", ["check", "--json", "--no-fail", "--only", "env PODMAN_USERNS"], env
+        binaries,
+        "pinp-i",
+        ["pinp-check", "--json", "--no-fail", "--only", "env PODMAN_USERNS"],
+        env,
     )
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
