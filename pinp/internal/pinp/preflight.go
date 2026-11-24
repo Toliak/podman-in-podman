@@ -297,16 +297,15 @@ func RunChecks(env *Env) Report {
 	// on a host identity map there is nothing to compare, so stay quiet.
 	for _, c := range []struct {
 		label, mapFile, subFile string
-		ownID                   int
 	}{
-		{"subuid consistency", env.UIDMapFile, env.SubUIDFile, env.UID},
-		{"subgid consistency", env.GIDMapFile, env.SubGIDFile, env.GID},
+		{"subuid consistency", env.UIDMapFile, env.SubUIDFile},
+		{"subgid consistency", env.GIDMapFile, env.SubGIDFile},
 	} {
 		extents, err := ParseIDMapFile(c.mapFile)
 		if err != nil || IsHostIdentityMap(extents) {
 			continue
 		}
-		derived, _ := DeriveSubIDRanges(extents, c.ownID, 0)
+		derived, _ := DeriveSubIDRanges(extents, 0)
 		actual, _ := ParseSubIDFile(c.subFile, env.User)
 		if !sameRanges(derived, actual) {
 			r.add(c.label, StatusWarn, fmt.Sprintf("%s has %s; derived from %s is %s; refresh with pinp-i pinp-prepare", c.subFile, formatRanges(actual), c.mapFile, formatRanges(derived)))

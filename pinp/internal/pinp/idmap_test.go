@@ -3,6 +3,7 @@ package pinp
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -40,14 +41,80 @@ func TestParseSubIDFileBadRange(t *testing.T) {
 }
 
 func TestOuterMaps(t *testing.T) {
-	uidmaps, gidmaps := OuterMaps(1002, 1006, DefaultTotal)
-	if len(uidmaps) != 4 || len(gidmaps) != 4 {
-		t.Fatalf("expected 4 extents each, got uid=%v gid=%v", uidmaps, gidmaps)
+	cases := []struct {
+		name             string
+		uid, gid         int
+		u, g             int
+		total            int
+		wantUID, wantGID []string
+	}{
+		{
+			name:    "default U=0,G=0",
+			uid:     1002,
+			gid:     1006,
+			u:       0,
+			g:       0,
+			total:   DefaultTotal,
+			wantUID: []string{"0:0:1", "1:1:1002", "100000:1003:64531", "65534:65534:2"},
+			wantGID: []string{"0:0:1", "1:1:1006", "100000:1007:64527", "65534:65534:2"},
+		},
+		{
+			name:    "bare keep-id U=$UID,G=$GID (legacy)",
+			uid:     1002,
+			gid:     1006,
+			u:       1002,
+			g:       1006,
+			total:   DefaultTotal,
+			wantUID: []string{"1002:0:1", "0:1:1002", "100000:1003:64531", "65534:65534:2"},
+			wantGID: []string{"1006:0:1", "0:1:1006", "100000:1007:64527", "65534:65534:2"},
+		},
+		{
+			name:    "keep-id:uid=100,gid=100",
+			uid:     1002,
+			gid:     1006,
+			u:       100,
+			g:       100,
+			total:   DefaultTotal,
+			wantUID: []string{"100:0:1", "0:1:100", "101:101:902", "100000:1003:64531", "65534:65534:2"},
+			wantGID: []string{"100:0:1", "0:1:100", "101:101:906", "100000:1007:64527", "65534:65534:2"},
+		},
 	}
-	if uidmaps[0] != "1002:0:1" || uidmaps[2] != "100000:1003:64531" {
-		t.Fatalf("unexpected uidmaps: %v", uidmaps)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			uidmaps, gidmaps := OuterMaps(c.uid, c.gid, c.u, c.g, c.total)
+			if !reflect.DeepEqual(uidmaps, c.wantUID) {
+				t.Fatalf("uidmaps = %v, want %v", uidmaps, c.wantUID)
+			}
+			if !reflect.DeepEqual(gidmaps, c.wantGID) {
+				t.Fatalf("gidmaps = %v, want %v", gidmaps, c.wantGID)
+			}
+			if len(uidmaps) > 5 || len(gidmaps) > 5 {
+				t.Fatalf("more than 5 extents: uid=%v gid=%v", uidmaps, gidmaps)
+			}
+		})
 	}
-	if gidmaps[0] != "1006:0:1" || gidmaps[2] != "100000:1007:64527" {
-		t.Fatalf("unexpected gidmaps: %v", gidmaps)
+}
+
+func TestValidateKeepID(t *testing.T) {
+	cases := []struct {
+		name    string
+		k       KeepID
+		wantErr bool
+	}{
+		{"default", DefaultKeepID(), false},
+		{"explicit target", KeepID{UID: 100, GID: 100, Size: DefaultTotal}, false},
+		{"size equal to pool", KeepID{UID: 0, GID: 0, Size: 65536}, false},
+		{"size above pool", KeepID{UID: 0, GID: 0, Size: 70000}, true},
+		{"size too small", KeepID{UID: 0, GID: 0, Size: 1000}, true},
+		{"uid out of range", KeepID{UID: 90000, GID: 0, Size: DefaultTotal}, true},
+		{"gid out of range", KeepID{UID: 0, GID: 90000, Size: DefaultTotal}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := ValidateKeepID(c.k, 1002, 1006, 65536)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("ValidateKeepID(%v) = %v, wantErr=%v", c.k, err, c.wantErr)
+			}
+		})
 	}
 }

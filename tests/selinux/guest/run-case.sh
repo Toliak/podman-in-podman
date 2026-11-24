@@ -24,6 +24,13 @@ esac
 
 U="$(id -u)"
 G="$(id -g)"
+# This harness deliberately keeps the LEGACY (bare --userns=keep-id) outer map,
+# i.e. OuterMaps(U, G, U, G, 65536): the host user lands at container UID U, so
+# the shared /var/lib/shared store is owned by devuser and the inner podman can
+# use it. pinp-e's new default (keep-id:uid=0,gid=0) maps the host user to
+# container root, which makes that store root-owned and unusable by a rootless
+# inner engine (see /tmp/opencode/pinp/userns-spike-3.md); pinp-e warns about it.
+# Keep these extents in sync with pinp/internal/pinp/idmap.go OuterMaps.
 UIDMAP=(--uidmap "${U}:0:1" --uidmap "0:1:${U}" --uidmap "100000:$((U + 1)):$((65536 - U - 3))" --uidmap '65534:65534:2')
 GIDMAP=(--gidmap "${G}:0:1" --gidmap "0:1:${G}" --gidmap "100000:$((G + 1)):$((65536 - G - 3))" --gidmap '65534:65534:2')
 STORE="${HOME}/.local/share/containers/storage"

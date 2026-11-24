@@ -27,13 +27,43 @@ nested namespace usable.
   - `--security-opt label=disable` — only on SELinux-enforcing hosts; a no-op
     elsewhere. `pinp-e` injects it conditionally (`PINP_SELINUX=auto` probes
     `/sys/fs/selinux`, `on`/`off` force it). See `TODO.md` findings.
-  - custom `--uidmap` / `--gidmap`: maps the container's user
-    back to the host user, container root to a subuid, and exposes a wide range
-    (`100000:...`) of intermediate IDs — do **not** unify uidmap and gidmap when
-    UID != GID.
+  - custom `--uidmap` / `--gidmap`: a **target-aware** map that puts the host
+    user at a chosen container UID/GID, keeps the `100000:...` anchor of
+    intermediate IDs, and never exceeds the 5-extent `newuidmap` ceiling — do
+    **not** unify uidmap and gidmap when UID != GID. With no `--userns` flag the
+    host user becomes container root (`uid=0,gid=0`); see the section below.
   - `-v $HOME/.local/share/containers/storage:/var/lib/shared` (optional): bind
     the host image store so the inner podman sees host images read-only.
 - Base image present locally (e.g. `debian:trixie`) — no pull needed inside.
+
+### Host `--userns` policy (`pinp-e`)
+
+`--userns` and `--uidmap`/`--gidmap` are mutually exclusive, so `pinp-e` strips
+`--userns` and injects its own maps:
+
+| `pinp-e` argv | host user lands at | notes |
+|---|---|---|
+| no `--userns` | container UID 0 / GID 0 | **default**; overrides podman's `--userns=host`, host user becomes container root |
+| `--userns=keep-id` | UID `$UID` / GID `$GID` | today's legacy 4-extent map |
+| `--userns=keep-id:uid=U,gid=G` | UID `U` / GID `G` | target-aware map (5 extents for `U != 0, U != $UID`) |
+| `--userns=keep-id:uid=U` | UID `U` / GID `$GID` | missing component defaults to the host ID |
+| `--userns=keep-id:gid=G` | UID `$UID` / GID `G` | |
+| `--userns=keep-id:size=S` | `$UID` / `$GID`, total `S` | `S` must not exceed the host subuid pool |
+
+`--userns=` (empty) is an alias for `--userns=host` and is rejected; `host`,
+`auto`, `nomap`, `ns:`, `container:` and `auto:size=` are rejected with a
+`PINP_PASSTHROUGH=1` hint. Both `=` and two-token forms are accepted.
+
+**Shared-store caveat (spike-3)**: when the target is root (`U==0` or `G==0`),
+the bind-mounted host store is owned by container UID 0 inside L1, so a rootless
+inner engine cannot open `/var/lib/shared/overlay-images/images.lock`. `pinp-e`
+emits a stderr warning but keeps the store enabled (it never disables it). Bare
+`--userns=keep-id` (`U=$UID,G=$GID`) keeps the store usable; an explicit
+`keep-id:uid=U,gid=G` target additionally requires the L1 engine to run **as
+that UID `U`** (spike 3: the store is then owned by `U`). Root-in-L1 (rootful
+engine) is not a workaround — it fails at `crun: mount 'proc' to 'proc':
+Operation not permitted`. See `/tmp/opencode/pinp/userns-spike-3.md` and the
+deferred `pinp-i` TODO item.
 
 ## In the outer container (L1 image)
 
@@ -63,21 +93,27 @@ setcap cap_setgid+ep /usr/bin/newgidmap
 
 Rather than hand-baking the sparse lines above, `pinp-i pinp-prepare` (alias
 `gen-sub`) derives `/etc/subuid` + `/etc/subgid` from the `ID-inside-ns` column
-of `/proc/self/uid_map` / `/proc/self/gid_map`. It drops the user's own-id
-extent, container id 0, and the nobody extent, keeping <= 5 extents; uid and
-gid are derived **separately** (host UID != GID). For the captured L1 map this
-yields `devuser:1:1001` + `devuser:100000:64531` (uid) and `devuser:1:1005` +
-`devuser:100000:64527` (gid). By default it only prints the two files and the
-cap commands (zero side effects); `--write` writes them, clears setuid **and
-setgid** on the helpers, and runs `setcap` (`PINP_SETCAP`). `--max-size 32768`
-reproduces the hand-baked `...:100000:32768` line. It refuses a host identity
-map ("not inside a nested userns").
+of `/proc/self/uid_map` / `/proc/self/gid_map`. It drops the extent whose
+**parent is 0** (the host user's own id, wherever the keep-id target put it),
+container id 0, and identity extents (including the nobody extent), keeping
+<= 5 extents; uid and gid are derived **separately** (host UID != GID). For the
+legacy L1 map this yields `devuser:1:1001` + `devuser:100000:64531` (uid) and
+`devuser:1:1005` + `devuser:100000:64527` (gid); for the `uid=0,gid=0` default
+it yields just `devuser:100000:64531` / `devuser:100000:64527`, and for
+`uid=100,gid=100` it adds a `1:99` low range. A one-ID `0 0 1` own-id extent is
+not a host identity map, so a target-aware L1 map is accepted. By default it
+only prints the two files and the cap commands (zero side effects); `--write`
+writes them, clears setuid **and setgid** on the helpers, and runs `setcap`
+(`PINP_SETCAP`). `--max-size 32768` reproduces the hand-baked
+`...:100000:32768` line. It refuses a single-extent host identity map
+("not inside a nested userns").
 
 **`pinp-prepare` must run at L1 runtime** (entrypoint or `podman exec -u root`),
-not image build: `/proc/self/uid_map` only shows the 4-extent nested map once
-`pinp-e` has created L1. The SELinux L1 image keeps the hand-baked lines as a
-fallback; wiring the harness to `pinp-prepare --write` is deferred. Injection
-into `InnerRunArgs` stays static pending the offset-vs-absolute spike.
+not image build: `/proc/self/uid_map` only shows the nested map once `pinp-e`
+has created L1. The SELinux L1 image keeps the hand-baked lines as a fallback
+(they also fit the `uid=0,gid=0` default when the shared store is not mounted);
+wiring the harness to `pinp-prepare --write` is deferred. Injection into
+`InnerRunArgs` stays static.
 
 `pinp-i pinp-check` enforces exactly this (L1-only): it FAILs when either helper
 is setuid-root or lacks `cap_setuid=ep` / `cap_setgid=ep` file caps. On the host
@@ -107,7 +143,9 @@ These keys are optional now: `pinp-i` injects the equivalent podman flags on
 *newly pulled* image writes, it does not add a read-only store — so it still needs
 `storage.conf` and the `/var/lib/shared` mount.
 
-`/var/lib/shared` mount point must exist and be owned by the user.
+`/var/lib/shared` mount point must exist and be owned by the user. With the
+`uid=0,gid=0` default the host store is root-owned inside L1 instead — see the
+shared-store caveat above.
 
 ## Running the inner container (L2)
 

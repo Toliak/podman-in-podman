@@ -54,16 +54,57 @@ func TotalSize(ranges []Range) int {
 	return total
 }
 
-func OuterMaps(uid, gid, total int) ([]string, []string) {
-	build := func(id int) []string {
-		return []string{
-			fmt.Sprintf("%d:0:1", id),
-			fmt.Sprintf("0:1:%d", id),
-			fmt.Sprintf("%d:%d:%d", ContainerRangeStart, id+1, total-id-3),
-			fmt.Sprintf("%d:%d:2", total-2, total-2),
+// OuterMaps builds the outer --uidmap/--gidmap extents. uid/gid are the host
+// user's real IDs (they size the low range and the anchor); u/g are the target
+// container IDs where the host user lands (DefaultKeepID gives 0/0). The low
+// range always covers container IDs 0..max(id,u) so the L1 image's USER (id)
+// stays mapped, and the 100000 anchor is preserved. At most 5 extents, which
+// is the newuidmap ceiling.
+func OuterMaps(uid, gid, u, g, total int) ([]string, []string) {
+	build := func(id, target int) []string {
+		low := id
+		if target > low {
+			low = target
 		}
+		out := []string{fmt.Sprintf("%d:0:1", target)}
+		if target > 0 {
+			out = append(out, fmt.Sprintf("0:1:%d", target))
+		}
+		if low > target {
+			out = append(out, fmt.Sprintf("%d:%d:%d", target+1, target+1, low-target))
+		}
+		out = append(out,
+			fmt.Sprintf("%d:%d:%d", ContainerRangeStart, low+1, total-low-3),
+			fmt.Sprintf("%d:%d:2", total-2, total-2),
+		)
+		return out
 	}
-	return build(uid), build(gid)
+	return build(uid, u), build(gid, g)
+}
+
+// ValidateKeepID bounds a resolved keep-id target against the host's
+// subordinate-ID pool and the extent arithmetic in OuterMaps.
+func ValidateKeepID(k KeepID, uid, gid, pool int) error {
+	low := uid
+	if gid > low {
+		low = gid
+	}
+	if k.UID > low {
+		low = k.UID
+	}
+	if k.GID > low {
+		low = k.GID
+	}
+	if k.UID < 0 || k.GID < 0 || k.UID >= k.Size-2 || k.GID >= k.Size-2 {
+		return fmt.Errorf("keep-id uid=%d gid=%d out of range for size=%d", k.UID, k.GID, k.Size)
+	}
+	if k.Size > pool {
+		return fmt.Errorf("keep-id size=%d exceeds the host subordinate ID pool (%d)", k.Size, pool)
+	}
+	if k.Size <= low+3 {
+		return fmt.Errorf("keep-id size=%d is too small (need > %d)", k.Size, low+3)
+	}
+	return nil
 }
 
 func ValidateHostRanges(uidRanges, gidRanges []Range) error {

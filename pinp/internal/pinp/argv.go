@@ -3,6 +3,7 @@ package pinp
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -168,6 +169,61 @@ func StripUserns(args []string, start, end int) []string {
 	out = append(out, args[:start]...)
 	out = append(out, args[end:]...)
 	return out
+}
+
+// KeepID is the resolved target of a --userns=keep-id... value: the container
+// UID/GID where the host user lands, and the size of the user namespace.
+type KeepID struct {
+	UID  int
+	GID  int
+	Size int
+}
+
+// DefaultKeepID is pinp-e's target when --userns is absent. It overrides
+// podman's --userns=host default: the host user becomes container root while
+// pinp still creates the userns and the 100000 anchor it needs for nested
+// podman.
+func DefaultKeepID() KeepID {
+	return KeepID{UID: 0, GID: 0, Size: DefaultTotal}
+}
+
+// ParseKeepID parses a --userns value into a KeepID. hostUID/hostGID are the
+// caller's real IDs (defaults for bare keep-id and for missing uid=/gid=
+// options); total is the default userns size. An empty value is an error:
+// podman treats --userns="" as an alias for --userns=host. Any non-keep-id
+// value (host/auto/nomap/ns:/container:) is rejected with a passthrough hint.
+func ParseKeepID(value string, hostUID, hostGID, total int) (KeepID, error) {
+	if value == "" {
+		return KeepID{}, fmt.Errorf("conflicting arguments already supplied: --userns= (empty value is an alias for --userns=host); set PINP_PASSTHROUGH=1 to bypass injection")
+	}
+	if value == "keep-id" {
+		return KeepID{UID: hostUID, GID: hostGID, Size: total}, nil
+	}
+	if !strings.HasPrefix(value, "keep-id:") {
+		return KeepID{}, fmt.Errorf("conflicting arguments already supplied: --userns=%s (unsupported: pinp needs its own uid maps for nested podman); set PINP_PASSTHROUGH=1 to bypass injection", value)
+	}
+	k := KeepID{UID: hostUID, GID: hostGID, Size: total}
+	for _, opt := range strings.Split(strings.TrimPrefix(value, "keep-id:"), ",") {
+		name, val, ok := strings.Cut(opt, "=")
+		if !ok {
+			return KeepID{}, fmt.Errorf("invalid --userns=%s: option %q needs a value", value, opt)
+		}
+		n, err := strconv.Atoi(val)
+		if err != nil || n < 0 {
+			return KeepID{}, fmt.Errorf("invalid --userns=%s: option %q has a bad value", value, opt)
+		}
+		switch name {
+		case "uid":
+			k.UID = n
+		case "gid":
+			k.GID = n
+		case "size":
+			k.Size = n
+		default:
+			return KeepID{}, fmt.Errorf("invalid --userns=%s: unknown keep-id option %q", value, name)
+		}
+	}
+	return k, nil
 }
 
 func OuterRunArgs(env *Env, uidmaps, gidmaps []string) []string {

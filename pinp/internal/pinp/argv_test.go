@@ -2,6 +2,7 @@ package pinp
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -149,6 +150,44 @@ func TestStripUserns(t *testing.T) {
 				if got[i] != c.want[i] {
 					t.Fatalf("StripUserns(%v) = %v, want %v", c.args, got, c.want)
 				}
+			}
+		})
+	}
+}
+
+func TestParseKeepID(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    KeepID
+		wantErr bool
+	}{
+		{"empty", "", KeepID{}, true},
+		{"bare keep-id", "keep-id", KeepID{UID: 1002, GID: 1006, Size: DefaultTotal}, false},
+		{"uid+gid", "keep-id:uid=100,gid=100", KeepID{UID: 100, GID: 100, Size: DefaultTotal}, false},
+		{"uid only", "keep-id:uid=42", KeepID{UID: 42, GID: 1006, Size: DefaultTotal}, false},
+		{"gid only", "keep-id:gid=7", KeepID{UID: 1002, GID: 7, Size: DefaultTotal}, false},
+		{"size", "keep-id:size=8192", KeepID{UID: 1002, GID: 1006, Size: 8192}, false},
+		{"all", "keep-id:gid=9,size=4096,uid=8", KeepID{UID: 8, GID: 9, Size: 4096}, false},
+		{"uid=0,gid=0", "keep-id:uid=0,gid=0", KeepID{UID: 0, GID: 0, Size: DefaultTotal}, false},
+		{"host", "host", KeepID{}, true},
+		{"auto", "auto", KeepID{}, true},
+		{"nomap", "nomap", KeepID{}, true},
+		{"ns", "ns:foo", KeepID{}, true},
+		{"auto:size", "auto:size=8192", KeepID{}, true},
+		{"unknown option", "keep-id:foo=1", KeepID{}, true},
+		{"missing value", "keep-id:uid", KeepID{}, true},
+		{"bad value", "keep-id:uid=x", KeepID{}, true},
+		{"negative", "keep-id:uid=-1", KeepID{}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := ParseKeepID(c.value, 1002, 1006, DefaultTotal)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("ParseKeepID(%q) = %v, %v; wantErr=%v", c.value, got, err, c.wantErr)
+			}
+			if !c.wantErr && !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("ParseKeepID(%q) = %v, want %v", c.value, got, c.want)
 			}
 		})
 	}

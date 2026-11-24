@@ -8,6 +8,10 @@ import (
 const (
 	capturedUIDMap = "0 1 1002\n1002 0 1\n65534 65534 2\n100000 1003 64531\n"
 	capturedGIDMap = "0 1 1006\n1006 0 1\n65534 65534 2\n100000 1007 64527\n"
+	u0UIDMap       = "0 0 1\n1 1 1002\n65534 65534 2\n100000 1003 64531\n"
+	u0GIDMap       = "0 0 1\n1 1 1006\n65534 65534 2\n100000 1007 64527\n"
+	u100UIDMap     = "0 1 100\n100 0 1\n101 101 902\n65534 65534 2\n100000 1003 64531\n"
+	u100GIDMap     = "0 1 100\n100 0 1\n101 101 906\n65534 65534 2\n100000 1007 64527\n"
 	hostIdentity   = "0 0 4294967295\n"
 )
 
@@ -38,31 +42,63 @@ func TestIsHostIdentityMap(t *testing.T) {
 		t.Fatal("single host identity extent must be refused")
 	}
 	if !IsHostIdentityMap(mustParse(t, "0 0 5\n1 1 5\n")) {
-		t.Fatal("all-identity map must be refused")
+		t.Fatal("wide 0 0 identity extent must be refused")
 	}
 	if IsHostIdentityMap(mustParse(t, capturedUIDMap)) {
 		t.Fatal("nested L1 map must not be refused")
 	}
+	if IsHostIdentityMap(mustParse(t, u0UIDMap)) {
+		t.Fatal("keep-id:uid=0 own-id extent (0 0 1) plus other extents must not be refused")
+	}
 }
 
 func TestDeriveSubIDRanges(t *testing.T) {
-	uidRanges, _ := DeriveSubIDRanges(mustParse(t, capturedUIDMap), 1002, 0)
-	wantUID := []Range{{Start: 1, Size: 1001}, {Start: 100000, Size: 64531}}
-	if !reflect.DeepEqual(uidRanges, wantUID) {
-		t.Fatalf("derived subuid = %v, want %v", uidRanges, wantUID)
+	cases := []struct {
+		name             string
+		uidMap, gidMap   string
+		wantUID, wantGID []Range
+	}{
+		{
+			name:    "legacy keep-id",
+			uidMap:  capturedUIDMap,
+			gidMap:  capturedGIDMap,
+			wantUID: []Range{{Start: 1, Size: 1001}, {Start: 100000, Size: 64531}},
+			wantGID: []Range{{Start: 1, Size: 1005}, {Start: 100000, Size: 64527}},
+		},
+		{
+			name:    "default U=0",
+			uidMap:  u0UIDMap,
+			gidMap:  u0GIDMap,
+			wantUID: []Range{{Start: 100000, Size: 64531}},
+			wantGID: []Range{{Start: 100000, Size: 64527}},
+		},
+		{
+			name:    "keep-id:uid=100,gid=100",
+			uidMap:  u100UIDMap,
+			gidMap:  u100GIDMap,
+			wantUID: []Range{{Start: 1, Size: 99}, {Start: 100000, Size: 64531}},
+			wantGID: []Range{{Start: 1, Size: 99}, {Start: 100000, Size: 64527}},
+		},
 	}
-	gidRanges, _ := DeriveSubIDRanges(mustParse(t, capturedGIDMap), 1006, 0)
-	wantGID := []Range{{Start: 1, Size: 1005}, {Start: 100000, Size: 64527}}
-	if !reflect.DeepEqual(gidRanges, wantGID) {
-		t.Fatalf("derived subgid = %v, want %v", gidRanges, wantGID)
-	}
-	if reflect.DeepEqual(uidRanges, gidRanges) {
-		t.Fatal("uid and gid ranges must stay separate (host UID != GID)")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			uidRanges, _ := DeriveSubIDRanges(mustParse(t, c.uidMap), 0)
+			if !reflect.DeepEqual(uidRanges, c.wantUID) {
+				t.Fatalf("derived subuid = %v, want %v", uidRanges, c.wantUID)
+			}
+			gidRanges, _ := DeriveSubIDRanges(mustParse(t, c.gidMap), 0)
+			if !reflect.DeepEqual(gidRanges, c.wantGID) {
+				t.Fatalf("derived subgid = %v, want %v", gidRanges, c.wantGID)
+			}
+			if reflect.DeepEqual(uidRanges, gidRanges) {
+				t.Fatal("uid and gid ranges must stay separate (host UID != GID)")
+			}
+		})
 	}
 }
 
 func TestDeriveSubIDRangesMaxSize(t *testing.T) {
-	ranges, _ := DeriveSubIDRanges(mustParse(t, capturedUIDMap), 1002, 32768)
+	ranges, _ := DeriveSubIDRanges(mustParse(t, capturedUIDMap), 32768)
 	want := []Range{{Start: 1, Size: 1001}, {Start: 100000, Size: 32768}}
 	if !reflect.DeepEqual(ranges, want) {
 		t.Fatalf("--max-size 32768 = %v, want %v", ranges, want)
@@ -74,7 +110,7 @@ func TestDeriveSubIDRangesCapsToFive(t *testing.T) {
 	for i := 1; i <= 8; i++ {
 		extents = append(extents, IDMapExtent{Inside: i * 10, Parent: i*10 + 1, Length: 5})
 	}
-	ranges, warnings := DeriveSubIDRanges(extents, 1002, 0)
+	ranges, warnings := DeriveSubIDRanges(extents, 0)
 	if len(ranges) != maxSubIDRanges {
 		t.Fatalf("got %d ranges, want <= %d: %v", len(ranges), maxSubIDRanges, ranges)
 	}

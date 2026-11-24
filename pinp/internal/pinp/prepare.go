@@ -67,13 +67,15 @@ func ParseIDMapFile(path string) ([]IDMapExtent, error) {
 
 // IsHostIdentityMap reports whether extents describe a host (non-nested)
 // identity map, where no L1 subordinate ranges can be derived. A single extent
-// or an extent with inside==parent==0 ("0 0 4294967295") is such a map.
+// or a wide extent with inside==parent==0 ("0 0 4294967295") is such a map.
+// A one-ID "0 0 1" extent is NOT a host identity map: with keep-id:uid=0 the
+// host user legitimately lands at container UID 0 alongside other extents.
 func IsHostIdentityMap(extents []IDMapExtent) bool {
 	if len(extents) < 2 {
 		return true
 	}
 	for _, e := range extents {
-		if e.Inside == 0 && e.Parent == 0 {
+		if e.Inside == 0 && e.Parent == 0 && e.Length > 1 {
 			return true
 		}
 	}
@@ -82,18 +84,16 @@ func IsHostIdentityMap(extents []IDMapExtent) bool {
 
 // DeriveSubIDRanges turns the "ID-inside-ns" column of an L1 id map into the
 // subordinate-ID ranges for that user's /etc/sub{u,g}id. UID and GID are
-// derived completely separately (host UID != GID). It drops the extent holding
-// the user's own id, container id 0 (L1 root), and the identity-mapped nobody
-// overflow extent, then caps each range at maxSize (0 = unlimited) and keeps at
-// most maxSubIDRanges extents.
-func DeriveSubIDRanges(extents []IDMapExtent, ownID, maxSize int) ([]Range, []string) {
+// derived completely separately (host UID != GID). It drops the extent whose
+// parent is 0 (the host user's own id, wherever the keep-id target placed it),
+// container id 0 (L1 root), and identity-mapped extents (including the nobody
+// overflow), then caps each range at maxSize (0 = unlimited) and keeps at most
+// maxSubIDRanges extents.
+func DeriveSubIDRanges(extents []IDMapExtent, maxSize int) ([]Range, []string) {
 	var warnings []string
 	var ranges []Range
 	for _, e := range extents {
-		if e.Inside <= ownID && ownID < e.Inside+e.Length {
-			continue
-		}
-		if e.Inside == e.Parent || e.Inside == nobodyID {
+		if e.Parent == 0 || e.Inside == e.Parent || e.Inside == nobodyID {
 			continue
 		}
 		start, size := e.Inside, e.Length
@@ -251,7 +251,7 @@ func RunPrepareCommand(env *Env, args []string) error {
 		refused = true
 		warnings = append(warnings, "not inside a nested userns (uid_map is a host identity map); refusing to derive subordinate IDs")
 	} else {
-		r, w := DeriveSubIDRanges(uidExtents, env.UID, *maxSize)
+		r, w := DeriveSubIDRanges(uidExtents, *maxSize)
 		uidRanges = r
 		warnings = append(warnings, w...)
 	}
@@ -264,7 +264,7 @@ func RunPrepareCommand(env *Env, args []string) error {
 		refused = true
 		warnings = append(warnings, "not inside a nested userns (gid_map is a host identity map); refusing to derive subordinate IDs")
 	} else {
-		r, w := DeriveSubIDRanges(gidExtents, env.GID, *maxSize)
+		r, w := DeriveSubIDRanges(gidExtents, *maxSize)
 		gidRanges = r
 		warnings = append(warnings, w...)
 	}

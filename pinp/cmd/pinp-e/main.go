@@ -35,9 +35,11 @@ func run() error {
 		sub := args[idx]
 		if sub == "run" || sub == "create" {
 			tail := args[idx+1:]
+			keep := pinp.DefaultKeepID()
 			if value, start, end, found := pinp.FindUserns(tail); found {
-				if value != "keep-id" {
-					return fmt.Errorf("conflicting arguments already supplied: --userns=%s (unsupported: pinp needs its own uid maps for nested podman); set PINP_PASSTHROUGH=1 to bypass injection", value)
+				keep, err = pinp.ParseKeepID(value, env.UID, env.GID, pinp.DefaultTotal)
+				if err != nil {
+					return err
 				}
 				tail = pinp.StripUserns(tail, start, end)
 				args = append(args[:idx+1:idx+1], tail...)
@@ -62,7 +64,14 @@ func run() error {
 			if err := pinp.ValidateHostRanges(uidRanges, gidRanges); err != nil {
 				return err
 			}
-			uidmaps, gidmaps := pinp.OuterMaps(env.UID, env.GID, pinp.DefaultTotal)
+			pool := min(pinp.TotalSize(uidRanges), pinp.TotalSize(gidRanges))
+			if err := pinp.ValidateKeepID(keep, env.UID, env.GID, pool); err != nil {
+				return err
+			}
+			if (keep.UID == 0 || keep.GID == 0) && env.Store != "" {
+				fmt.Fprintln(os.Stderr, "pinp-e: warning: the host user maps to container root (uid=0/gid=0), so the shared image store (/var/lib/shared) is root-owned inside L1 and a rootless inner container engine cannot use it; use bare --userns=keep-id (uid=$UID,gid=$GID) to keep the store usable, or run the L1 engine as an explicit keep-id:uid=U,gid=G target")
+			}
+			uidmaps, gidmaps := pinp.OuterMaps(env.UID, env.GID, keep.UID, keep.GID, keep.Size)
 			args = pinp.InjectAt(args, idx, pinp.OuterRunArgs(env, uidmaps, gidmaps))
 		}
 	}

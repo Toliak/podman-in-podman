@@ -8,17 +8,17 @@ from helpers import base_env, explained_argv, run_wrapper
 
 EXPECTED_MAPS = [
     "--uidmap",
-    "1002:0:1",
+    "0:0:1",
     "--uidmap",
-    "0:1:1002",
+    "1:1:1002",
     "--uidmap",
     "100000:1003:64531",
     "--uidmap",
     "65534:65534:2",
     "--gidmap",
-    "1006:0:1",
+    "0:0:1",
     "--gidmap",
-    "0:1:1006",
+    "1:1:1006",
     "--gidmap",
     "100000:1007:64527",
     "--gidmap",
@@ -154,3 +154,20 @@ def test_insufficient_host_ranges_fail(binaries: Path, tmp_path: Path) -> None:
     result = run_wrapper(binaries, "pinp-e", ["run", "debian:latest"], env)
     assert result.returncode != 0
     assert "too small" in result.stderr
+
+
+def test_default_root_at_zero_warns_about_shared_store(binaries: Path, tmp_path: Path) -> None:
+    env = base_env(tmp_path)
+    result = run_wrapper(binaries, "pinp-e", ["run", "debian:latest"], env)
+    assert result.returncode == 0
+    assert "shared image store" in result.stderr
+    assert "root-owned" in result.stderr
+
+
+def test_no_warning_with_nonzero_keep_id_target(binaries: Path, tmp_path: Path) -> None:
+    env = base_env(tmp_path)
+    result = run_wrapper(
+        binaries, "pinp-e", ["run", "--userns=keep-id:uid=100,gid=100", "debian:latest"], env
+    )
+    assert result.returncode == 0
+    assert "shared image store" not in result.stderr
