@@ -13,9 +13,10 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["."]
 pythonpath = ["."]
-norecursedirs = [".venv", "build", "dist", "selinux/results"]
+norecursedirs = [".venv", "build", "dist", "selinux/results", "nonselinux/results"]
 markers = [
   "selinux: opt-in QEMU/SELinux VM matrix (set PINP_SELINUX_TEST=1)",
+  "nonselinux: opt-in QEMU non-SELinux golden path (set PINP_NONSELINUX_TEST=1)",
   "e2e: opt-in tests that require a real local podman",
 ]
 

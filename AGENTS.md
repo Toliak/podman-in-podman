@@ -10,14 +10,16 @@
   - `internal/pinp` — argv parsing/injection, id maps, `podman info`, effective config merge, wrapper TOML config, file caps, preflight report, `pinp-` subcommand dispatch (`commands.go`), and L1 subuid/subgid derivation (`prepare.go`).
 - `tests/` — Python project (`pyproject.toml`, `uv.lock`, `conftest.py`, `helpers.py`, `test_*.py`): pytest/ruff black-box suite managed by `uv`.
 - `tests/selinux/` — opt-in QEMU/SELinux experiment harness (`make selinux-test`); not part of `make all`.
+- `tests/nonselinux/` — opt-in QEMU **non-SELinux** golden-path e2e for the wrappers (`make nonselinux-test`); reuses `tests/selinux/lib.sh` + `prepare-image.sh` from the shared image cache, boots with `selinux=0`, not part of `make all`.
 - Root = `Makefile` + docs (`.gitignore`, `AGENTS.md`, `INFO.md`, `TODO.md`) + generated `bin/`, `tests/.venv/`, caches.
 - `INFO.md` = background/requirements; `TODO.md` = tracked experiments (do not remove).
 
 ## Commands
 
 - `make all` = build both binaries + `go -C pinp test ./...` + pytest + `ruff check` + `ruff format --check` + `go -C pinp vet ./...`.
-- `make build | test | lint | vet | clean | sync | selinux-test`
+- `make build | test | lint | vet | clean | sync | selinux-test | nonselinux-test`
 - `make selinux-test` = boot a Fedora 45 QEMU VM (KVM or TCG) and run the SELinux `:z` / `label=nested` matrix via pytest (`tests/selinux/test_matrix.py`, marker `selinux`, gated by `PINP_SELINUX_TEST=1`). Downloads ~607 MB; artifacts in `.selinux-cache/` (override with `PINP_SELINUX_CACHE`).
+- `make nonselinux-test` = boot the same Fedora 45 image with `selinux=0` and run the golden-path e2e (`tests/nonselinux/test_nonselinux.py`, marker `nonselinux`, gated by `PINP_NONSELINUX_TEST=1`): `pinp-e` -> L1 -> `pinp-i` -> L2 `echo`/`build`/`pinp-check`. Shares the image cache; runtime state in `.nonselinux-cache/` (override with `PINP_NONSELINUX_CACHE`), SSH port 2223 (`PINP_NONSELINUX_SSH_PORT`).
 - Opt-in e2e: `PINP_E2E=1 uv run --project tests pytest -q -c tests/pyproject.toml -m e2e tests/test_e2e.py`.
 - Venv: `make sync` runs `uv sync --project tests --frozen`; `tests/uv.lock` is committed, the venv lives at `tests/.venv`, requires `uv` 0.13+.
 - Go deps are only `pflag`, `toml`, `gocapability`. Do NOT import `github.com/containers/*` or podman packages. Modules are fetched at build time (no `vendor/`).
@@ -29,7 +31,8 @@
 - Unit tests may be Go (`*_test.go` in the Go module, `go -C pinp test ./...`); every other test — integration, e2e, SELinux — must be written in or executable via pytest.
 - Checked 2026-11-24: Go unit tests cover shell quoting, wrapper config precedence, id maps (incl. target-aware `OuterMaps` + `ParseKeepID` + `ValidateKeepID`), argv helpers, config-arg injection, the `pinp-` dispatch table and L1 id-map derivation; 160 pytest tests collected (158 pass, 2 opt-in skips) — black-box CLI contract tests with a stub podman; no live-podman e2e by default.
 - `make test` runs `go -C pinp test ./...` then pytest (both depend on `make sync`).
-- `tests/selinux/test_matrix.py` is opt-in (`PINP_SELINUX_TEST=1`, marker `selinux`); the bash scripts remain the harness body. `tests/test_e2e.py` is opt-in (`PINP_E2E=1`, marker `e2e`).
+- `tests/selinux/test_matrix.py` is opt-in (`PINP_SELINUX_TEST=1`, marker `selinux`); the bash scripts remain the harness body. `tests/nonselinux/test_nonselinux.py` is opt-in (`PINP_NONSELINUX_TEST=1`, marker `nonselinux`) and drives a non-SELinux guest over SSH. `tests/test_e2e.py` is opt-in (`PINP_E2E=1`, marker `e2e`).
+- The portable subset (no `label=disable`, `/dev/fuse` + read-only shared store + id maps injected, inner uid maps, a valid `pinp-check` report) lives in `tests/helpers.py::assert_portable_checks` and is run on both the host (`tests/test_e2e.py`) and the non-SELinux guest (`tests/nonselinux/test_nonselinux.py`).
 
 ## Config
 
@@ -59,4 +62,5 @@
 - The outer map is 4 extents by default (`uid=0,gid=0`) or 5 for a non-zero, non-`$UID` target; `newuidmap` caps at 5.
 - L1's `/etc/subuid` is intentionally sparse (`devuser:100000:32768` + `devuser:1:1001`); the baked lines also work with the `uid=0,gid=0` default map when the shared store is not mounted.
 - `podman --imagestore` redirects *newly pulled* image writes (`man podman`); it is not `additionalimagestores`, so that key still needs `storage.conf` plus the `/var/lib/shared` mount.
-- Test hooks: `PINP_UID/GID/USER`, `PINP_SUBUID_FILE`, `PINP_SUBGID_FILE`, `PINP_STORE`, `PINP_HOME`, `PINP_PODMAN`, `PINP_USR_SHARE_CONTAINERS`, `PINP_ETC_CONTAINERS`, `XDG_CONFIG_HOME`, `PINP_FUSE_DEVICE`, `PINP_SHARED_STORE`, `PINP_NEWUIDMAP`, `PINP_NEWGIDMAP`, `PINP_UID_MAP_FILE`, `PINP_GID_MAP_FILE`, `PINP_SETCAP`, `PINP_INNER_UIDMAPS`, `PINP_STORE_OPTS`, `PINP_PASSTHROUGH`, `PINP_SKIP_CHECKS`, `PINP_ECHO`, `PINP_SELINUX`, `PINP_SELINUXFS`, `PINP_CONFIG`, `PINP_CONFIG_ARGS`, `PINP_E2E`, `PINP_SELINUX_TEST`.
+- Test hooks: `PINP_UID/GID/USER`, `PINP_SUBUID_FILE`, `PINP_SUBGID_FILE`, `PINP_STORE`, `PINP_HOME`, `PINP_PODMAN`, `PINP_USR_SHARE_CONTAINERS`, `PINP_ETC_CONTAINERS`, `XDG_CONFIG_HOME`, `PINP_FUSE_DEVICE`, `PINP_SHARED_STORE`, `PINP_NEWUIDMAP`, `PINP_NEWGIDMAP`, `PINP_UID_MAP_FILE`, `PINP_GID_MAP_FILE`, `PINP_SETCAP`, `PINP_INNER_UIDMAPS`, `PINP_STORE_OPTS`, `PINP_PASSTHROUGH`, `PINP_SKIP_CHECKS`, `PINP_ECHO`, `PINP_SELINUX`, `PINP_SELINUXFS`, `PINP_CONFIG`, `PINP_CONFIG_ARGS`, `PINP_E2E`, `PINP_SELINUX_TEST`, `PINP_NONSELINUX_TEST`, `PINP_NONSELINUX_CACHE`, `PINP_NONSELINUX_SSH_PORT`.
+- `tests/selinux/lib.sh` honours `PINP_VM_RUN_CACHE` / `PINP_VM_PIDFILE` / `PINP_VM_SERIAL` / `PINP_VM_SSH_PORT` / `PINP_VM_KERNEL_EXTRA` / `PINP_VM_LOG_PREFIX` (all default to the old SELinux behaviour); `tests/nonselinux/lib.sh` sets them to `selinux=0`, a separate runtime cache and port 2223.

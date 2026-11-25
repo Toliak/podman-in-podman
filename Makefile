@@ -4,7 +4,7 @@ UV ?= uv
 UV_RUN ?= $(UV) run --project tests --no-sync
 PYTEST_CONFIG ?= tests/pyproject.toml
 
-.PHONY: all build test lint vet clean selinux-test sync
+.PHONY: all build test lint vet clean selinux-test nonselinux-test sync
 
 all: build test lint
 
@@ -33,3 +33,6 @@ clean:
 
 selinux-test: build sync
 	PINP_SELINUX_TEST=1 $(UV_RUN) pytest -q -s -c $(PYTEST_CONFIG) -m selinux tests/selinux/test_matrix.py
+
+nonselinux-test: build sync
+	PINP_NONSELINUX_TEST=1 $(UV_RUN) pytest -q -s -c $(PYTEST_CONFIG) -m nonselinux tests/nonselinux/test_nonselinux.py

@@ -9,18 +9,25 @@ BASE_IMAGE="Fedora-Cloud-Base-Generic-45-1.4.x86_64.qcow2"
 CHECKSUM_FILE="Fedora-Cloud-45-1.4-x86_64-CHECKSUM"
 IMAGE_URL_BASE="https://download.fedoraproject.org/pub/fedora/linux/releases/45/Cloud/x86_64/images"
 
-SSH_PORT="${PINP_SELINUX_SSH_PORT:-2222}"
+# Base/kernel artifacts (qcow2, baked overlay, kernel/initrd, vm.env, ssh key) stay
+# in CACHE_DIR so a sibling harness can share them. Runtime state (prepared image,
+# pidfile, serial log, case overlays) can be redirected with RUN_CACHE. Both default
+# to CACHE_DIR, so the SELinux harness is unchanged unless the PINP_VM_* vars are set.
+RUN_CACHE="${PINP_VM_RUN_CACHE:-${CACHE_DIR}}"
+
+SSH_PORT="${PINP_VM_SSH_PORT:-${PINP_SELINUX_SSH_PORT:-2222}}"
 SSH_KEY="${CACHE_DIR}/id_ed25519"
 GUEST_USER="devuser"
 VM_RAM="${PINP_SELINUX_RAM:-1536}"
 VM_CPUS="${PINP_SELINUX_CPUS:-2}"
-VM_PIDFILE="${CACHE_DIR}/qemu.pid"
-VM_SERIAL="${CACHE_DIR}/serial.log"
+VM_PIDFILE="${PINP_VM_PIDFILE:-${CACHE_DIR}/qemu.pid}"
+VM_SERIAL="${PINP_VM_SERIAL:-${CACHE_DIR}/serial.log}"
+LOG_PREFIX="${PINP_VM_LOG_PREFIX:-selinux}"
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o BatchMode=yes)
 
 log() {
-  printf '[selinux] %s\n' "$*" >&2
+  printf '[%s] %s\n' "$LOG_PREFIX" "$*" >&2
 }
 
 die() {
@@ -94,6 +101,6 @@ vm_stop() {
   rm -f "$VM_PIDFILE"
 }
 
-export SEL_DIR REPO_DIR CACHE_DIR
+export SEL_DIR REPO_DIR CACHE_DIR RUN_CACHE
 export BASE_IMAGE CHECKSUM_FILE IMAGE_URL_BASE
-export SSH_PORT SSH_KEY GUEST_USER VM_RAM VM_CPUS VM_PIDFILE VM_SERIAL
+export SSH_PORT SSH_KEY GUEST_USER VM_RAM VM_CPUS VM_PIDFILE VM_SERIAL LOG_PREFIX

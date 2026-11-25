@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -161,6 +162,47 @@ def run_wrapper(
 def explained_argv(result: subprocess.CompletedProcess[str]) -> list[str]:
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
+
+
+def assert_portable_checks(
+    run: Callable[[list[str], dict[str, str]], subprocess.CompletedProcess[str]],
+    env: dict[str, str],
+    pinp_e: str,
+    pinp_i: str,
+) -> None:
+    """Checks that hold wherever SELinux is absent (dev host or non-SELinux guest).
+
+    Shared by the host e2e test and the VM test so the same portable contract is
+    exercised in both places. `run` executes one argv with `env` and returns a
+    CompletedProcess (locally on the host, over SSH in the VM).
+    """
+    # pinp-e: no label=disable when SELinux is off, but /dev/fuse, the read-only
+    # shared store and pinp's own id maps are always injected.
+    result = run([pinp_e, "run", "debian:trixie", "true"], env)
+    assert result.returncode == 0, result.stderr
+    argv = json.loads(result.stdout)
+    assert "label=disable" not in " ".join(argv), argv
+    assert "--device" in argv and "/dev/fuse" in argv, argv
+    assert any(arg.endswith(":/var/lib/shared:ro") for arg in argv), argv
+    assert "--uidmap" in argv and "--gidmap" in argv, argv
+
+    # pinp-i run/create: the nested inner uid maps are injected.
+    result = run([pinp_i, "run", "debian:trixie", "true"], env)
+    assert result.returncode == 0, result.stderr
+    argv = json.loads(result.stdout)
+    assert "0:0:1500" in argv and "65534:1500:2" in argv, argv
+
+    # pinp-i pinp-check: the preflight runs end-to-end and emits a consistent
+    # report. (The setuid/file-cap result is environment-specific — it is a hard
+    # FAIL on a host and a PASS inside L1 — so only internal consistency is
+    # asserted here; the golden path asserts zero failures inside L1.)
+    result = run([pinp_i, "pinp-check", "--json", "--no-fail"], env)
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["checks"], result.stdout
+    assert report["summary"]["fail"] == sum(
+        1 for check in report["checks"] if check["status"] == "fail"
+    ), result.stdout
 
 
 def config_env(tmp_path: Path, stub_podman: Path) -> dict[str, str]:

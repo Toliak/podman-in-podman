@@ -13,7 +13,7 @@ case "$action" in
     [[ -f "$overlay" ]] || die "overlay not found: ${overlay}"
     accel="$(qemu_accel)"
     log "booting ${overlay} (accel=${accel}, root=${ROOT_ARG}, rootflags=${ROOTFLAGS:-none})"
-    kernel_cmdline="root=${ROOT_ARG} ro console=ttyS0,115200 selinux=1 enforcing=1"
+    kernel_cmdline="root=${ROOT_ARG} ro console=ttyS0,115200 ${PINP_VM_KERNEL_EXTRA:-selinux=1 enforcing=1}"
     if [[ -n "${ROOTFLAGS:-}" ]]; then
       kernel_cmdline="${kernel_cmdline} rootflags=${ROOTFLAGS}"
     fi

@@ -18,11 +18,14 @@ KVM is used when `/dev/kvm` is writable, otherwise TCG (functionally identical, 
 
 Only small files: `bin/pinp-e`, `bin/pinp-i`, the scripts, and `guest/image/` (~4 KB: Containerfile + 3 confs). `pinp-outer` is built **inside the VM** with `podman build`, and `debian:trixie` is pulled there over QEMU user-net NAT. No `podman save` of host images; `quay.io/podman/stable` is unrelated (`Containerfile` is `FROM debian:trixie`).
 
+## Shared with the non-SELinux harness
+
+`tests/nonselinux/` reuses this harness's image build (`prepare-image.sh`, the baked overlay, kernel/initrd, `vm.env` and SSH key in the shared cache) and `lib.sh`/`boot.sh`, booting the same image with `selinux=0`. `lib.sh` therefore honours `PINP_VM_RUN_CACHE` / `PINP_VM_PIDFILE` / `PINP_VM_SERIAL` / `PINP_VM_SSH_PORT` / `PINP_VM_KERNEL_EXTRA` / `PINP_VM_LOG_PREFIX`; all default to the values below, so this harness is unchanged.
+
 ## Layout
 
 | Path | Purpose |
-|---|---|
-| `lib.sh` | shared vars, SSH helpers, KVM/TCG detection, VM lifecycle |
+|---|---|| `lib.sh` | shared vars, SSH helpers, KVM/TCG detection, VM lifecycle |
 | `prepare-image.sh` | download + checksum + baked overlay + kernel/initrd extraction |
 | `prepare-guest.sh` | boot once, run `guest/setup.sh`, freeze as `prepared.qcow2` |
 | `boot.sh` | `start [overlay.qcow2] \| stop \| status` |

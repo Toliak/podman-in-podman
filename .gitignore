@@ -1,5 +1,7 @@
 .selinux-cache/
 tests/selinux/results/
+.nonselinux-cache/
+tests/nonselinux/results/
 
 bin/
 .venv*/
