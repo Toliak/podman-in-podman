@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"strconv"
 	"strings"
 
@@ -80,6 +81,38 @@ func IsHostIdentityMap(extents []IDMapExtent) bool {
 		}
 	}
 	return false
+}
+
+// PrepareTarget is the L1 user that owns the generated /etc/sub{u,g}id lines.
+// It is deliberately decoupled from the user running --write: at L1 runtime
+// --write runs as root while the files must belong to the non-root L1 podman
+// user that the host user is mapped to.
+type PrepareTarget struct {
+	User string
+	UID  int
+	GID  int
+}
+
+// lookupUserByID resolves an L1 uid to a username via /etc/passwd. It is a
+// variable so unit tests can stub it without depending on the host's passwd.
+var lookupUserByID = func(uid int) (string, bool) {
+	u, err := user.LookupId(strconv.Itoa(uid))
+	if err != nil {
+		return "", false
+	}
+	return u.Username, true
+}
+
+// hostUserInside returns the inside id of the <id>:0:1 extent -- the L1 user
+// the host user (parent 0) is mapped to, wherever the keep-id target put it.
+// A wide 0 0 <large> host identity extent is not a host-user extent.
+func hostUserInside(extents []IDMapExtent) (int, bool) {
+	for _, e := range extents {
+		if e.Parent == 0 && e.Length == 1 {
+			return e.Inside, true
+		}
+	}
+	return 0, false
 }
 
 // DeriveSubIDRanges turns the "ID-inside-ns" column of an L1 id map into the
@@ -186,6 +219,50 @@ func linesFor(user string, ranges []Range) []string {
 	return strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 }
 
+// resolveTarget derives the owner of the L1 /etc/sub{u,g}id lines. By default
+// it is the L1 user the host user is mapped to (the parent-0, length-1 extent),
+// resolved to a name via /etc/passwd; --user / PINP_USER override it. It is
+// intentionally independent of the user executing --write (root at L1 runtime).
+func resolveTarget(env *Env, uidExtents, gidExtents []IDMapExtent, overrideUser string) (PrepareTarget, []string) {
+	var warnings []string
+	target := PrepareTarget{User: env.User, UID: env.UID, GID: env.GID}
+	if id, ok := hostUserInside(uidExtents); ok {
+		target.UID = id
+	}
+	if id, ok := hostUserInside(gidExtents); ok {
+		target.GID = id
+	}
+	switch {
+	case overrideUser != "":
+		target.User = overrideUser
+	case env.UserSet:
+		target.User = env.User
+	default:
+		if name, ok := lookupUserByID(target.UID); ok {
+			target.User = name
+		} else {
+			warnings = append(warnings, fmt.Sprintf("no passwd entry for uid %d; using numeric uid as the /etc/subuid owner", target.UID))
+			target.User = strconv.Itoa(target.UID)
+		}
+	}
+	return target, warnings
+}
+
+// ResolvePrepareTarget reads the id-map files and resolves the target. Used by
+// the L1 preflight consistency check and the build-spike hint so they compare
+// against the same owner as pinp-prepare --write.
+func ResolvePrepareTarget(env *Env) (PrepareTarget, []string) {
+	uidExtents, _ := ParseIDMapFile(env.UIDMapFile)
+	gidExtents, _ := ParseIDMapFile(env.GIDMapFile)
+	return resolveTarget(env, uidExtents, gidExtents, "")
+}
+
+// subidOwnerIsRoot reports whether the resolved owner would produce root-owned
+// subordinate-ID lines, which a rootless inner podman cannot use.
+func subidOwnerIsRoot(t PrepareTarget) bool {
+	return t.User == "root" || t.User == "0"
+}
+
 // applyFileCaps clears setuid AND setgid on the helper and runs setcap. Any
 // failure (EPERM/EINVAL inside a userns, missing binary, ...) is returned as a
 // warning string; it never hard-fails prepare (caps are best applied at image
@@ -221,6 +298,7 @@ func RunPrepareCommand(env *Env, args []string) error {
 	write := fs.Bool("write", false, "write the files and apply file capabilities")
 	maxSize := fs.Int("max-size", 0, "cap each derived range at this size (0 = unlimited)")
 	jsonOut := fs.Bool("json", false, "emit the result as JSON")
+	userFlag := fs.String("user", "", "user that owns the generated /etc/subuid and /etc/subgid lines (default: derived from the id map)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -269,18 +347,24 @@ func RunPrepareCommand(env *Env, args []string) error {
 		warnings = append(warnings, w...)
 	}
 
-	subuidLines := linesFor(env.User, uidRanges)
-	subgidLines := linesFor(env.User, gidRanges)
+	target, targetWarnings := resolveTarget(env, uidExtents, gidExtents, *userFlag)
+	warnings = append(warnings, targetWarnings...)
+
+	subuidLines := linesFor(target.User, uidRanges)
+	subgidLines := linesFor(target.User, gidRanges)
 	caps := CapCommands(env, selCapUID, selCapGID)
 
 	if *write && !refused {
+		if subidOwnerIsRoot(target) {
+			warnings = append(warnings, "--write: /etc/subuid owner resolves to root; a rootless inner podman cannot use root-owned subordinate ranges (set --user / PINP_USER; writing anyway)")
+		}
 		if selUID {
-			if err := os.WriteFile(env.SubUIDFile, []byte(SubIDFileContent(env.User, uidRanges)), 0o644); err != nil {
+			if err := os.WriteFile(env.SubUIDFile, []byte(SubIDFileContent(target.User, uidRanges)), 0o644); err != nil {
 				return fmt.Errorf("write %s: %w", env.SubUIDFile, err)
 			}
 		}
 		if selGID {
-			if err := os.WriteFile(env.SubGIDFile, []byte(SubIDFileContent(env.User, gidRanges)), 0o644); err != nil {
+			if err := os.WriteFile(env.SubGIDFile, []byte(SubIDFileContent(target.User, gidRanges)), 0o644); err != nil {
 				return fmt.Errorf("write %s: %w", env.SubGIDFile, err)
 			}
 		}
@@ -299,7 +383,7 @@ func RunPrepareCommand(env *Env, args []string) error {
 	}
 
 	out := prepareOut{
-		User:     env.User,
+		User:     target.User,
 		SubUID:   prepareFileOut{File: env.SubUIDFile, Lines: subuidLines},
 		SubGID:   prepareFileOut{File: env.SubGIDFile, Lines: subgidLines},
 		Caps:     caps,
@@ -320,10 +404,10 @@ func RunPrepareCommand(env *Env, args []string) error {
 		}
 	} else {
 		if selUID {
-			fmt.Fprintf(os.Stdout, "# %s\n%s", env.SubUIDFile, SubIDFileContent(env.User, uidRanges))
+			fmt.Fprintf(os.Stdout, "# %s\n%s", env.SubUIDFile, SubIDFileContent(target.User, uidRanges))
 		}
 		if selGID {
-			fmt.Fprintf(os.Stdout, "# %s\n%s", env.SubGIDFile, SubIDFileContent(env.User, gidRanges))
+			fmt.Fprintf(os.Stdout, "# %s\n%s", env.SubGIDFile, SubIDFileContent(target.User, gidRanges))
 		}
 		if len(caps) > 0 {
 			fmt.Fprintln(os.Stdout, "# file capabilities")

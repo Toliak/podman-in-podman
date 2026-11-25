@@ -177,3 +177,46 @@ def test_write_only_selected_file(binaries: Path, tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "gen-subuid").read_text() == "\n".join(SUBUID_LINES) + "\n"
     assert not (tmp_path / "gen-subgid").exists()
+
+
+def test_write_uses_user_override_without_identity_hooks(binaries: Path, tmp_path: Path) -> None:
+    env = prepare_env(tmp_path, with_identity=False)
+    result = _prepare(binaries, tmp_path, "--user", "devuser", "--write", env=env)
+    assert result.returncode == 0, result.stderr
+    assert "warning" not in result.stderr
+    assert (tmp_path / "gen-subuid").read_text() == "devuser:1:1001\ndevuser:100000:64531\n"
+    assert (tmp_path / "gen-subgid").read_text() == "devuser:1:1005\ndevuser:100000:64527\n"
+    assert not (tmp_path / "podman-called").exists()
+
+
+def test_write_uses_pinp_user_override_without_identity_hooks(
+    binaries: Path, tmp_path: Path
+) -> None:
+    env = prepare_env(tmp_path, with_identity=False)
+    env["PINP_USER"] = "devuser"
+    result = _prepare(binaries, tmp_path, "--write", env=env)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "gen-subuid").read_text() == "devuser:1:1001\ndevuser:100000:64531\n"
+    assert (tmp_path / "gen-subgid").read_text() == "devuser:1:1005\ndevuser:100000:64527\n"
+
+
+def test_json_derived_owner_is_consistent_without_hooks(binaries: Path, tmp_path: Path) -> None:
+    env = prepare_env(tmp_path, with_identity=False)
+    result = _prepare(binaries, tmp_path, "--json", env=env)
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    owner = data["user"]
+    assert owner != "root"
+    assert owner != ""
+    assert data["subuid"]["lines"] == [f"{owner}:1:1001", f"{owner}:100000:64531"]
+    assert data["subgid"]["lines"] == [f"{owner}:1:1005", f"{owner}:100000:64527"]
+
+
+def test_write_warns_but_writes_root_owner(binaries: Path, tmp_path: Path) -> None:
+    env = prepare_env(tmp_path)
+    env["PINP_USER"] = "root"
+    result = _prepare(binaries, tmp_path, "--write", env=env)
+    assert result.returncode == 0, result.stderr
+    assert "owner resolves to root" in result.stderr
+    assert (tmp_path / "gen-subuid").read_text().startswith("root:")
+    assert (tmp_path / "gen-subgid").read_text().startswith("root:")

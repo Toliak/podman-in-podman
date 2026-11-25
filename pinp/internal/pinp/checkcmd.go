@@ -13,8 +13,9 @@ import (
 var ErrCheckFailed = errors.New("preflight checks failed")
 
 func MaybeBuildSpike(env *Env) {
-	uidRanges, _ := ParseSubIDFile(env.SubUIDFile, env.User)
-	gidRanges, _ := ParseSubIDFile(env.SubGIDFile, env.User)
+	target, _ := ResolvePrepareTarget(env)
+	uidRanges, _ := ParseSubIDFile(env.SubUIDFile, target.User)
+	gidRanges, _ := ParseSubIDFile(env.SubGIDFile, target.User)
 	if len(uidRanges) > 1 || len(gidRanges) > 1 {
 		fmt.Fprintln(os.Stderr, BuildSpikeHint(uidRanges, gidRanges))
 	}

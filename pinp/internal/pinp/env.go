@@ -34,6 +34,7 @@ type Env struct {
 	UID              int
 	GID              int
 	User             string
+	UserSet          bool
 	SubUIDFile       string
 	SubGIDFile       string
 	Store            string
@@ -98,7 +99,8 @@ func LoadEnv() (*Env, error) {
 		}
 	}
 	userName := strVal("PINP_USER", cfg.Host.User, "")
-	if userName == "" {
+	userSet := userName != ""
+	if !userSet {
 		current, err := user.Current()
 		if err != nil {
 			return nil, fmt.Errorf("resolve user: %w", err)
@@ -124,6 +126,7 @@ func LoadEnv() (*Env, error) {
 		UID:              uid,
 		GID:              gid,
 		User:             userName,
+		UserSet:          userSet,
 		SubUIDFile:       strVal("PINP_SUBUID_FILE", cfg.Host.SubUIDFile, DefaultSubUIDFile),
 		SubGIDFile:       strVal("PINP_SUBGID_FILE", cfg.Host.SubGIDFile, DefaultSubGIDFile),
 		Store:            strVal("PINP_STORE", cfg.Host.Store, filepath.Join(home, ".local/share/containers/storage")),

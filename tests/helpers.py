@@ -107,9 +107,16 @@ def unset_config_env(tmp_path: Path) -> dict[str, str]:
 
 
 def prepare_env(
-    tmp_path: Path, *, uid_map: str | None = None, gid_map: str | None = None
+    tmp_path: Path,
+    *,
+    uid_map: str | None = None,
+    gid_map: str | None = None,
+    with_identity: bool = True,
 ) -> dict[str, str]:
     env = base_env(tmp_path)
+    if not with_identity:
+        for key in ("PINP_UID", "PINP_GID", "PINP_USER"):
+            env.pop(key, None)
     (tmp_path / "uid_map").write_text(uid_map if uid_map is not None else UID_MAP_L1)
     (tmp_path / "gid_map").write_text(gid_map if gid_map is not None else GID_MAP_L1)
     # gen-subuid / gen-subgid are left absent on purpose: --write creates them

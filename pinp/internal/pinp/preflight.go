@@ -295,6 +295,7 @@ func RunChecks(env *Env) Report {
 	}
 	// Derived subordinate-ID info is meaningful only inside a nested L1 userns;
 	// on a host identity map there is nothing to compare, so stay quiet.
+	target, _ := ResolvePrepareTarget(env)
 	for _, c := range []struct {
 		label, mapFile, subFile string
 	}{
@@ -306,7 +307,7 @@ func RunChecks(env *Env) Report {
 			continue
 		}
 		derived, _ := DeriveSubIDRanges(extents, 0)
-		actual, _ := ParseSubIDFile(c.subFile, env.User)
+		actual, _ := ParseSubIDFile(c.subFile, target.User)
 		if !sameRanges(derived, actual) {
 			r.add(c.label, StatusWarn, fmt.Sprintf("%s has %s; derived from %s is %s; refresh with pinp-i pinp-prepare", c.subFile, formatRanges(actual), c.mapFile, formatRanges(derived)))
 		} else {

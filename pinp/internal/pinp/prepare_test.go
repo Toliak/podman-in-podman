@@ -119,6 +119,80 @@ func TestDeriveSubIDRangesCapsToFive(t *testing.T) {
 	}
 }
 
+func TestHostUserInside(t *testing.T) {
+	if id, ok := hostUserInside(mustParse(t, capturedUIDMap)); !ok || id != 1002 {
+		t.Fatalf("uid host-user inside = %d,%v, want 1002,true", id, ok)
+	}
+	if id, ok := hostUserInside(mustParse(t, capturedGIDMap)); !ok || id != 1006 {
+		t.Fatalf("gid host-user inside = %d,%v, want 1006,true", id, ok)
+	}
+	if id, ok := hostUserInside(mustParse(t, u0UIDMap)); !ok || id != 0 {
+		t.Fatalf("uid=0 host-user inside = %d,%v, want 0,true", id, ok)
+	}
+	if _, ok := hostUserInside(mustParse(t, hostIdentity)); ok {
+		t.Fatal("wide 0 0 identity extent must not be a host-user extent")
+	}
+	if _, ok := hostUserInside(nil); ok {
+		t.Fatal("empty map must not yield a host-user extent")
+	}
+}
+
+func TestResolveTarget(t *testing.T) {
+	orig := lookupUserByID
+	defer func() { lookupUserByID = orig }()
+	lookupUserByID = func(uid int) (string, bool) {
+		if uid == 1002 {
+			return "devuser", true
+		}
+		return "", false
+	}
+	uidExtents := mustParse(t, capturedUIDMap)
+	gidExtents := mustParse(t, capturedGIDMap)
+
+	derived := &Env{User: "root", UID: 0, GID: 0}
+	target, warnings := resolveTarget(derived, uidExtents, gidExtents, "")
+	if target.User != "devuser" || target.UID != 1002 || target.GID != 1006 {
+		t.Fatalf("derived target = %+v, want {devuser 1002 1006}", target)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("derived target warnings = %v, want none", warnings)
+	}
+
+	if target, _ := resolveTarget(derived, uidExtents, gidExtents, "override"); target.User != "override" {
+		t.Fatalf("--user override = %q, want override", target.User)
+	}
+	explicit := &Env{User: "tester", UID: 1002, GID: 1006, UserSet: true}
+	if target, _ := resolveTarget(explicit, uidExtents, gidExtents, ""); target.User != "tester" {
+		t.Fatalf("PINP_USER override = %q, want tester", target.User)
+	}
+
+	lookupUserByID = func(int) (string, bool) { return "", false }
+	target, warnings = resolveTarget(derived, uidExtents, gidExtents, "")
+	if target.User != "1002" {
+		t.Fatalf("numeric fallback owner = %q, want 1002", target.User)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected a warning for the numeric fallback")
+	}
+}
+
+func TestSubIDOwnerIsRoot(t *testing.T) {
+	cases := []struct {
+		user string
+		want bool
+	}{
+		{"root", true},
+		{"0", true},
+		{"devuser", false},
+		{"1002", false},
+	}
+	for _, c := range cases {
+		if got := subidOwnerIsRoot(PrepareTarget{User: c.user}); got != c.want {
+			t.Errorf("subidOwnerIsRoot(%q) = %v, want %v", c.user, got, c.want)
+		}
+	}
+}
+
 func TestSubIDFileContent(t *testing.T) {
 	got := SubIDFileContent("devuser", []Range{{Start: 1, Size: 1001}, {Start: 100000, Size: 64531}})
 	want := "devuser:1:1001\ndevuser:100000:64531\n"

@@ -108,6 +108,18 @@ writes them, clears setuid **and setgid** on the helpers, and runs `setcap`
 `...:100000:32768` line. It refuses a single-extent host identity map
 ("not inside a nested userns").
 
+The generated lines must be owned by the **L1 user the host user is mapped to**
+— the inside id of the `parent==0,length==1` extent — not by the user running
+`--write`. At L1 runtime `--write` runs as root (`podman exec -u root`), but the
+files belong to that mapped non-root user (e.g. `devuser`), which is who runs
+rootless podman and calls `newuidmap`. `pinp-prepare` derives that user and
+resolves its name via `/etc/passwd`; override it with `--user NAME`,
+`PINP_USER`, or `[host] user`. When no override is set and the mapped id has no
+passwd entry, a numeric uid is used with a WARN. `--write` WARNs (but still
+writes) when the owner would resolve to root, since a rootless inner engine
+cannot use root-owned subordinate ranges. `pinp-i pinp-check`'s `subuid`/
+`subgid consistency` checks use the same resolved owner.
+
 **`pinp-prepare` must run at L1 runtime** (entrypoint or `podman exec -u root`),
 not image build: `/proc/self/uid_map` only shows the nested map once `pinp-e`
 has created L1. The SELinux L1 image keeps the hand-baked lines as a fallback
