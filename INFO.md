@@ -156,6 +156,18 @@ These keys are optional now: `pinp-i` injects the equivalent podman flags on
 *newly pulled* image writes, it does not add a read-only store — so it still needs
 `storage.conf` and the `/var/lib/shared` mount.
 
+`pinp-i pinp-prepare` can generate that config instead of baking it. When
+`/var/lib/shared` is a mount point (checked via `/proc/self/mountinfo`), the
+default `pinp-prepare` output and `--write` include an additive drop-in at
+`<target home>/.config/containers/storage.conf.d/pinp-shared-store.conf`
+containing the **union** of the effective `additionalimagestores` and the shared
+store. It writes to the mapped L1 user's home (not root's, not `/etc`), because
+rootless podman reads `$XDG_CONFIG_HOME/containers/storage.conf.d`; `--write`
+creates it `0644` and chowns it to that user when running as root. When the store
+is unmounted the generation is skipped with an INFO. `PINP_STORAGE_CONF` /
+`[host] storage_conf` override the main `storage.conf` path (the drop-in dir is
+derived from its parent), and `pinp-i pinp-check` reports a `storage.conf` line.
+
 ### Sparse L1 build userns maps (`pinp-i build`)
 
 A rootless `buildah` maps container 0 to the L1 user's own id and container

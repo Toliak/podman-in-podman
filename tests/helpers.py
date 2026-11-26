@@ -128,6 +128,7 @@ def prepare_env(
     uid_map: str | None = None,
     gid_map: str | None = None,
     with_identity: bool = True,
+    shared_mounted: bool = True,
 ) -> dict[str, str]:
     env = base_env(tmp_path)
     if not with_identity:
@@ -146,12 +147,18 @@ def prepare_env(
     marker = tmp_path / "podman-called"
     (tmp_path / "podman-stub").write_text(f'#!/bin/sh\n: > "{marker}"\nexit 0\n')
     (tmp_path / "podman-stub").chmod(0o755)
+    mountinfo = tmp_path / "mountinfo"
+    shared_line = "36 25 0:32 / /var/lib/shared rw,relatime - ext4 /dev/sda1 rw\n"
+    root_line = "36 25 0:32 / / rw,relatime - ext4 /dev/sda1 rw\n"
+    mountinfo.write_text(shared_line if shared_mounted else root_line)
     env.update(
         {
             "PINP_UID_MAP_FILE": str(tmp_path / "uid_map"),
             "PINP_GID_MAP_FILE": str(tmp_path / "gid_map"),
             "PINP_SUBUID_FILE": str(tmp_path / "gen-subuid"),
             "PINP_SUBGID_FILE": str(tmp_path / "gen-subgid"),
+            "PINP_STORAGE_CONF": str(tmp_path / "home" / ".config" / "containers" / "storage.conf"),
+            "PINP_MOUNTINFO": str(mountinfo),
             "PINP_NEWUIDMAP": str(tmp_path / "newuidmap"),
             "PINP_NEWGIDMAP": str(tmp_path / "newgidmap"),
             "PINP_SETCAP": str(tmp_path / "setcap"),

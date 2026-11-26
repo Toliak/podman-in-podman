@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -66,6 +67,154 @@ func ParseIDMapFile(path string) ([]IDMapExtent, error) {
 	return ParseIDMap(data)
 }
 
+// mountInfoPath returns the file IsMountPoint parses. PINP_MOUNTINFO is a test
+// hook (like PINP_UID_MAP_FILE) so the shared-store gate can be exercised
+// without a real mount.
+func mountInfoPath() string {
+	if v := strings.TrimSpace(os.Getenv("PINP_MOUNTINFO")); v != "" {
+		return v
+	}
+	return "/proc/self/mountinfo"
+}
+
+// unescapeMountField decodes the octal escapes used in /proc/self/mountinfo
+// (space, tab, newline and backslash).
+func unescapeMountField(s string) string {
+	return strings.NewReplacer(
+		`\040`, " ",
+		`\011`, "\t",
+		`\012`, "\n",
+		`\134`, `\`,
+	).Replace(s)
+}
+
+// IsMountPoint reports whether path is a mount point, by scanning the fifth
+// field of /proc/self/mountinfo. This detects pinp-e's read-only bind mount of
+// the host store at /var/lib/shared inside L1 (existence alone is not enough,
+// because the L1 image bakes the directory).
+func IsMountPoint(path string) (bool, error) {
+	data, err := os.ReadFile(mountInfoPath())
+	if err != nil {
+		return false, err
+	}
+	want := filepath.Clean(path)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+		if filepath.Clean(unescapeMountField(fields[4])) == want {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// DeriveAdditionalStores merges the effective additionalimagestores with the
+// shared store, preserving order and dropping duplicates. The shared store is
+// appended only when it is not already present.
+func DeriveAdditionalStores(existing []string, shared string) []string {
+	out := make([]string, 0, len(existing)+1)
+	seen := map[string]bool{}
+	for _, store := range existing {
+		if store == "" || seen[store] {
+			continue
+		}
+		seen[store] = true
+		out = append(out, store)
+	}
+	if shared != "" && !seen[shared] {
+		out = append(out, shared)
+	}
+	return out
+}
+
+// StorageConfContent renders an additionalimagestores drop-in.
+func StorageConfContent(stores []string) string {
+	var b strings.Builder
+	b.WriteString("[storage.options]\nadditionalimagestores = [\n")
+	for _, store := range stores {
+		fmt.Fprintf(&b, "    %q,\n", store)
+	}
+	b.WriteString("]\n")
+	return b.String()
+}
+
+// storageConfPath resolves the storage.conf that the L1 rootless engine reads.
+// An explicit override wins; otherwise it is the mapped user's
+// ~/.config/containers/storage.conf (not root's, even when --write runs as root).
+func storageConfPath(env *Env, target PrepareTarget) string {
+	if env.StorageConf != "" {
+		return env.StorageConf
+	}
+	home := target.Home
+	if home == "" {
+		home = env.Home
+	}
+	return filepath.Join(home, ".config", "containers", "storage.conf")
+}
+
+// storageDropInPath is the non-destructive drop-in carrying additionalimagestores
+// next to the resolved storage.conf.
+func storageDropInPath(storageConf string) string {
+	return filepath.Join(filepath.Dir(storageConf), "storage.conf.d", "pinp-shared-store.conf")
+}
+
+// effectiveStores reads the additionalimagestores podman would use for the
+// target user. It points ConfigHome at the target's containers dir so a
+// root-running --write does not read root's config.
+func effectiveStores(env *Env, storageConf string) []string {
+	probe := *env
+	probe.ConfigHome = filepath.Dir(storageConf)
+	cfg, err := LoadEffectiveConfig(&probe)
+	if err != nil {
+		return nil
+	}
+	return cfg.Storage.Storage.Options.AdditionalImageStores
+}
+
+// writeStorageDropIn writes the drop-in idempotently and, when running as root
+// at L1 runtime, hands the file and any newly created parent dirs to the mapped
+// user. Non-root callers (e.g. tests) skip the chown silently. A failure is
+// returned as a warning string, never a hard error.
+func writeStorageDropIn(path, content string, target PrepareTarget) string {
+	if existing, err := os.ReadFile(path); err == nil && string(existing) == content {
+		return ""
+	}
+	dir := filepath.Dir(path)
+	var created []string
+	for p := dir; ; p = filepath.Dir(p) {
+		if _, err := os.Stat(p); err == nil {
+			break
+		}
+		created = append(created, p)
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Sprintf("create %s: %v", dir, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Sprintf("write %s: %v", path, err)
+	}
+	if os.Geteuid() == 0 {
+		for _, p := range created {
+			if err := os.Chown(p, target.UID, target.GID); err != nil {
+				return fmt.Sprintf("chown %s: %v", p, err)
+			}
+		}
+		if err := os.Chown(path, target.UID, target.GID); err != nil {
+			return fmt.Sprintf("chown %s: %v", path, err)
+		}
+	}
+	return ""
+}
+
 // IsHostIdentityMap reports whether extents describe a host (non-nested)
 // identity map, where no L1 subordinate ranges can be derived. A single extent
 // or a wide extent with inside==parent==0 ("0 0 4294967295") is such a map.
@@ -91,6 +240,7 @@ type PrepareTarget struct {
 	User string
 	UID  int
 	GID  int
+	Home string
 }
 
 // lookupUserByID resolves an L1 uid to a username via /etc/passwd. It is a
@@ -101,6 +251,16 @@ var lookupUserByID = func(uid int) (string, bool) {
 		return "", false
 	}
 	return u.Username, true
+}
+
+// lookupUserHome resolves a username to its home directory. It is a variable so
+// unit tests can stub it; a miss falls back to env.Home.
+var lookupUserHome = func(name string) (string, bool) {
+	u, err := user.Lookup(name)
+	if err != nil || u.HomeDir == "" {
+		return "", false
+	}
+	return u.HomeDir, true
 }
 
 // hostUserInside returns the inside id of the <id>:0:1 extent -- the L1 user
@@ -186,11 +346,13 @@ type prepareFileOut struct {
 }
 
 type prepareOut struct {
-	User     string         `json:"user"`
-	SubUID   prepareFileOut `json:"subuid"`
-	SubGID   prepareFileOut `json:"subgid"`
-	Caps     []string       `json:"caps"`
-	Warnings []string       `json:"warnings"`
+	User        string         `json:"user"`
+	SubUID      prepareFileOut `json:"subuid"`
+	SubGID      prepareFileOut `json:"subgid"`
+	StorageConf prepareFileOut `json:"storage_conf"`
+	Caps        []string       `json:"caps"`
+	Info        []string       `json:"info"`
+	Warnings    []string       `json:"warnings"`
 }
 
 func selectPair(changed bool, uid, gid bool, x string) (bool, bool, error) {
@@ -245,6 +407,11 @@ func resolveTarget(env *Env, uidExtents, gidExtents []IDMapExtent, overrideUser 
 			target.User = strconv.Itoa(target.UID)
 		}
 	}
+	if home, ok := lookupUserHome(target.User); ok {
+		target.Home = home
+	} else {
+		target.Home = env.Home
+	}
 	return target, warnings
 }
 
@@ -292,6 +459,7 @@ func RunPrepareCommand(env *Env, args []string) error {
 	genUID := fs.Bool("gen-subuid", false, "generate /etc/subuid")
 	genGID := fs.Bool("gen-subgid", false, "generate /etc/subgid")
 	genXID := fs.String("gen-subxid", "", "select files: u|g|ug")
+	genStorage := fs.Bool("gen-storage-conf", false, "generate the additionalimagestores storage.conf drop-in")
 	capUID := fs.Bool("cap-newuidmap", false, "print/apply the newuidmap file cap")
 	capGID := fs.Bool("cap-newgidmap", false, "print/apply the newgidmap file cap")
 	capXID := fs.String("cap-newxidmap", "", "select caps: u|g|ug")
@@ -306,10 +474,17 @@ func RunPrepareCommand(env *Env, args []string) error {
 		return fmt.Errorf("pinp-prepare takes no positional arguments: %v", fs.Args())
 	}
 
-	genChanged := fs.Changed("gen-subuid") || fs.Changed("gen-subgid") || fs.Changed("gen-subxid")
-	selUID, selGID, err := selectPair(genChanged, *genUID, *genGID, *genXID)
-	if err != nil {
-		return err
+	genChanged := fs.Changed("gen-subuid") || fs.Changed("gen-subgid") || fs.Changed("gen-subxid") || fs.Changed("gen-storage-conf")
+	var selUID, selGID, selStorage bool
+	var err error
+	if genChanged {
+		selUID, selGID, err = selectPair(true, *genUID, *genGID, *genXID)
+		if err != nil {
+			return err
+		}
+		selStorage = *genStorage
+	} else {
+		selUID, selGID, selStorage = true, true, true
 	}
 	capChanged := fs.Changed("cap-newuidmap") || fs.Changed("cap-newgidmap") || fs.Changed("cap-newxidmap")
 	selCapUID, selCapGID, err := selectPair(capChanged, *capUID, *capGID, *capXID)
@@ -354,6 +529,34 @@ func RunPrepareCommand(env *Env, args []string) error {
 	subgidLines := linesFor(target.User, gidRanges)
 	caps := CapCommands(env, selCapUID, selCapGID)
 
+	storageConf := storageConfPath(env, target)
+	storagePath := storageDropInPath(storageConf)
+	var storageContent string
+	storageConfigured := false
+	info := []string{}
+	if selStorage {
+		mounted, mountErr := IsMountPoint(env.SharedStore)
+		switch {
+		case mountErr != nil:
+			info = append(info, fmt.Sprintf("cannot read mount info: %v; skipping additionalimagestores", mountErr))
+		case !mounted:
+			info = append(info, fmt.Sprintf("%s is not a mount point; skipping additionalimagestores", env.SharedStore))
+		default:
+			stores := DeriveAdditionalStores(effectiveStores(env, storageConf), env.SharedStore)
+			storageContent = StorageConfContent(stores)
+			storageConfigured = true
+		}
+	}
+
+	if *write && selStorage && storageConfigured {
+		if subidOwnerIsRoot(target) {
+			warnings = append(warnings, fmt.Sprintf("--write: storage.conf owner resolves to root; a rootless inner podman may be unable to use %s (set --user / PINP_USER; writing anyway)", storagePath))
+		}
+		if w := writeStorageDropIn(storagePath, storageContent, target); w != "" {
+			warnings = append(warnings, w)
+		}
+	}
+
 	if *write && !refused {
 		if subidOwnerIsRoot(target) {
 			warnings = append(warnings, "--write: /etc/subuid owner resolves to root; a rootless inner podman cannot use root-owned subordinate ranges (set --user / PINP_USER; writing anyway)")
@@ -383,17 +586,25 @@ func RunPrepareCommand(env *Env, args []string) error {
 	}
 
 	out := prepareOut{
-		User:     target.User,
-		SubUID:   prepareFileOut{File: env.SubUIDFile, Lines: subuidLines},
-		SubGID:   prepareFileOut{File: env.SubGIDFile, Lines: subgidLines},
-		Caps:     caps,
-		Warnings: warnings,
+		User:        target.User,
+		SubUID:      prepareFileOut{File: env.SubUIDFile, Lines: subuidLines},
+		SubGID:      prepareFileOut{File: env.SubGIDFile, Lines: subgidLines},
+		StorageConf: prepareFileOut{File: storagePath, Lines: []string{}},
+		Caps:        caps,
+		Info:        info,
+		Warnings:    warnings,
+	}
+	if storageConfigured {
+		out.StorageConf.Lines = strings.Split(strings.TrimSuffix(storageContent, "\n"), "\n")
 	}
 	if !selUID {
 		out.SubUID.Lines = []string{}
 	}
 	if !selGID {
 		out.SubGID.Lines = []string{}
+	}
+	if !selStorage {
+		out.StorageConf.File = ""
 	}
 
 	if *jsonOut {
@@ -409,12 +620,18 @@ func RunPrepareCommand(env *Env, args []string) error {
 		if selGID {
 			fmt.Fprintf(os.Stdout, "# %s\n%s", env.SubGIDFile, SubIDFileContent(target.User, gidRanges))
 		}
+		if selStorage && storageConfigured {
+			fmt.Fprintf(os.Stdout, "# %s\n%s", storagePath, storageContent)
+		}
 		if len(caps) > 0 {
 			fmt.Fprintln(os.Stdout, "# file capabilities")
 			for _, c := range caps {
 				fmt.Fprintln(os.Stdout, c)
 			}
 		}
+	}
+	for _, msg := range info {
+		fmt.Fprintln(os.Stderr, "pinp-i: info:", msg)
 	}
 	for _, w := range warnings {
 		fmt.Fprintln(os.Stderr, "pinp-i: warning:", w)

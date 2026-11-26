@@ -220,3 +220,82 @@ def test_write_warns_but_writes_root_owner(binaries: Path, tmp_path: Path) -> No
     assert "owner resolves to root" in result.stderr
     assert (tmp_path / "gen-subuid").read_text().startswith("root:")
     assert (tmp_path / "gen-subgid").read_text().startswith("root:")
+
+
+def _storage_conf(tmp_path: Path) -> Path:
+    base = tmp_path / "home" / ".config" / "containers"
+    return base / "storage.conf.d" / "pinp-shared-store.conf"
+
+
+def test_default_prints_storage_conf(binaries: Path, tmp_path: Path) -> None:
+    result = _prepare(binaries, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert str(_storage_conf(tmp_path)) in result.stdout
+    assert "additionalimagestores = [" in result.stdout
+    assert '"/var/lib/shared"' in result.stdout
+
+
+def test_gen_storage_conf_only(binaries: Path, tmp_path: Path) -> None:
+    result = _prepare(binaries, tmp_path, "--gen-storage-conf")
+    assert result.returncode == 0, result.stderr
+    assert '"/var/lib/shared"' in result.stdout
+    assert "tester:1:1001" not in result.stdout
+    assert "tester:1:1005" not in result.stdout
+
+
+def test_gen_subuid_only_omits_storage_conf(binaries: Path, tmp_path: Path) -> None:
+    result = _prepare(binaries, tmp_path, "--gen-subuid")
+    assert result.returncode == 0, result.stderr
+    assert "tester:1:1001" in result.stdout
+    assert "additionalimagestores" not in result.stdout
+
+
+def test_json_output_has_storage_conf(binaries: Path, tmp_path: Path) -> None:
+    result = _prepare(binaries, tmp_path, "--json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["storage_conf"]["file"] == str(_storage_conf(tmp_path))
+    assert any('"/var/lib/shared"' in line for line in data["storage_conf"]["lines"])
+    assert data["info"] == []
+
+
+def test_write_creates_storage_conf(binaries: Path, tmp_path: Path) -> None:
+    env = prepare_env(tmp_path)
+    result = _prepare(binaries, tmp_path, "--write", env=env)
+    assert result.returncode == 0, result.stderr
+    conf = _storage_conf(tmp_path)
+    assert conf.exists()
+    content = conf.read_text()
+    assert "[storage.options]" in content
+    assert '"/var/lib/shared"' in content
+    assert "warning" not in result.stderr
+
+
+def test_write_storage_conf_idempotent(binaries: Path, tmp_path: Path) -> None:
+    env = prepare_env(tmp_path)
+    _prepare(binaries, tmp_path, "--write", env=env)
+    first = _storage_conf(tmp_path).read_text()
+    result = _prepare(binaries, tmp_path, "--write", env=env)
+    assert result.returncode == 0, result.stderr
+    assert _storage_conf(tmp_path).read_text() == first
+
+
+def test_storage_conf_skipped_when_unmounted(binaries: Path, tmp_path: Path) -> None:
+    env = prepare_env(tmp_path, shared_mounted=False)
+    result = _prepare(binaries, tmp_path, "--write", env=env)
+    assert result.returncode == 0, result.stderr
+    assert not _storage_conf(tmp_path).exists()
+    assert "info:" in result.stderr
+    assert "not a mount point" in result.stderr
+    assert "warning" not in result.stderr
+
+
+def test_storage_conf_union_preserves_existing(binaries: Path, tmp_path: Path) -> None:
+    env = prepare_env(tmp_path)
+    existing = tmp_path / "etc" / "storage.conf"
+    existing.write_text('[storage.options]\nadditionalimagestores=["/other/store"]\n')
+    result = _prepare(binaries, tmp_path, "--write", env=env)
+    assert result.returncode == 0, result.stderr
+    content = _storage_conf(tmp_path).read_text()
+    assert '"/other/store"' in content
+    assert '"/var/lib/shared"' in content

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -212,6 +213,20 @@ func RunChecks(env *Env) Report {
 			r.add("config additionalimagestores", StatusPass, SharedStorePath)
 		} else {
 			r.add("config additionalimagestores", StatusWarn, "not set; no podman CLI equivalent; mount /var/lib/shared in L1")
+		}
+		target, _ := ResolvePrepareTarget(env)
+		storageConf := storageConfPath(env, target)
+		dropIn := storageDropInPath(storageConf)
+		if mounted, err := IsMountPoint(env.SharedStore); err != nil {
+			r.add("storage.conf", StatusWarn, fmt.Sprintf("cannot read mount info: %v", err))
+		} else if !mounted {
+			r.add("storage.conf", StatusPass, env.SharedStore+" is not mounted; shared store disabled")
+		} else if _, err := os.Stat(dropIn); err == nil {
+			r.add("storage.conf", StatusPass, dropIn)
+		} else if hasString(cfg.Storage.Storage.Options.AdditionalImageStores, env.SharedStore) {
+			r.add("storage.conf", StatusPass, "additionalimagestores configured in effective config")
+		} else {
+			r.add("storage.conf", StatusWarn, fmt.Sprintf("mounted but not configured; run pinp-prepare --write (expected %s)", filepath.Clean(dropIn)))
 		}
 		mountProgram := cfg.Storage.Storage.Options.Overlay.MountProgram
 		if mountProgram == "" {

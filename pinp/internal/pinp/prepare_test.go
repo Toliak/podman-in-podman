@@ -1,6 +1,7 @@
 package pinp
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -248,4 +249,102 @@ func mustParse(t *testing.T, s string) []IDMapExtent {
 		t.Fatal(err)
 	}
 	return extents
+}
+
+func TestIsMountPoint(t *testing.T) {
+	dir := t.TempDir()
+	mountinfo := dir + "/mountinfo"
+	content := "36 25 0:32 / /var/lib/shared rw,relatime - ext4 /dev/sda1 rw\n" +
+		"37 25 0:33 / /tmp/with\\040space rw - ext4 /dev/sda2 rw\n"
+	if err := os.WriteFile(mountinfo, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PINP_MOUNTINFO", mountinfo)
+	for path, want := range map[string]bool{
+		"/var/lib/shared":     true,
+		"/var/lib/shared/":    true,
+		"/tmp/with space":     true,
+		"/var/lib/not-shared": false,
+	} {
+		got, err := IsMountPoint(path)
+		if err != nil {
+			t.Fatalf("IsMountPoint(%q): %v", path, err)
+		}
+		if got != want {
+			t.Errorf("IsMountPoint(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+func TestIsMountPointMissingFile(t *testing.T) {
+	t.Setenv("PINP_MOUNTINFO", "/nonexistent/mountinfo")
+	if _, err := IsMountPoint("/var/lib/shared"); err == nil {
+		t.Fatal("expected error for missing mountinfo")
+	}
+}
+
+func TestDeriveAdditionalStores(t *testing.T) {
+	cases := []struct {
+		existing []string
+		shared   string
+		want     []string
+	}{
+		{nil, "/var/lib/shared", []string{"/var/lib/shared"}},
+		{[]string{"/var/lib/shared"}, "/var/lib/shared", []string{"/var/lib/shared"}},
+		{[]string{"/other", "/var/lib/shared"}, "/var/lib/shared", []string{"/other", "/var/lib/shared"}},
+		{[]string{"/other", "/other", ""}, "/var/lib/shared", []string{"/other", "/var/lib/shared"}},
+	}
+	for _, c := range cases {
+		if got := DeriveAdditionalStores(c.existing, c.shared); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("DeriveAdditionalStores(%v, %q) = %v, want %v", c.existing, c.shared, got, c.want)
+		}
+	}
+}
+
+func TestStorageConfContent(t *testing.T) {
+	got := StorageConfContent([]string{"/other", "/var/lib/shared"})
+	want := "[storage.options]\nadditionalimagestores = [\n    \"/other\",\n    \"/var/lib/shared\",\n]\n"
+	if got != want {
+		t.Fatalf("StorageConfContent = %q, want %q", got, want)
+	}
+}
+
+func TestStoragePaths(t *testing.T) {
+	env := &Env{Home: "/home/fallback"}
+	target := PrepareTarget{Home: "/home/devuser"}
+	conf := storageConfPath(env, target)
+	if conf != "/home/devuser/.config/containers/storage.conf" {
+		t.Fatalf("storageConfPath = %q", conf)
+	}
+	if drop := storageDropInPath(conf); drop != "/home/devuser/.config/containers/storage.conf.d/pinp-shared-store.conf" {
+		t.Fatalf("storageDropInPath = %q", drop)
+	}
+	env.StorageConf = "/custom/storage.conf"
+	if got := storageConfPath(env, target); got != "/custom/storage.conf" {
+		t.Fatalf("override storageConfPath = %q", got)
+	}
+	target.Home = ""
+	if got := storageConfPath(&Env{Home: "/home/fallback"}, target); got != "/home/fallback/.config/containers/storage.conf" {
+		t.Fatalf("fallback storageConfPath = %q", got)
+	}
+}
+
+func TestWriteStorageDropInIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/storage.conf.d/pinp-shared-store.conf"
+	content := StorageConfContent([]string{"/var/lib/shared"})
+	target := PrepareTarget{UID: os.Getuid(), GID: os.Getgid()}
+	if w := writeStorageDropIn(path, content, target); w != "" {
+		t.Fatalf("writeStorageDropIn warn = %q", w)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Fatalf("content = %q, want %q", got, content)
+	}
+	if w := writeStorageDropIn(path, content, target); w != "" {
+		t.Fatalf("idempotent write warn = %q", w)
+	}
 }

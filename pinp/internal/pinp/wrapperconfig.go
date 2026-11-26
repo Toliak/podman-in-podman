@@ -24,6 +24,7 @@ type wrapperConfig struct {
 		Home               *string `toml:"home"`
 		SubUIDFile         *string `toml:"subuid_file"`
 		SubGIDFile         *string `toml:"subgid_file"`
+		StorageConf        *string `toml:"storage_conf"`
 		Store              *string `toml:"store"`
 		StoreOpts          *string `toml:"store_opts"`
 		FuseDevice         *string `toml:"fuse_device"`

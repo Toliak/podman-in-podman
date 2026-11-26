@@ -35,8 +35,10 @@ type Env struct {
 	GID              int
 	User             string
 	UserSet          bool
+	Home             string
 	SubUIDFile       string
 	SubGIDFile       string
+	StorageConf      string
 	Store            string
 	StoreOpts        string
 	FuseDevice       string
@@ -139,8 +141,10 @@ func LoadEnv() (*Env, error) {
 		GID:              gid,
 		User:             userName,
 		UserSet:          userSet,
+		Home:             home,
 		SubUIDFile:       strVal("PINP_SUBUID_FILE", cfg.Host.SubUIDFile, DefaultSubUIDFile),
 		SubGIDFile:       strVal("PINP_SUBGID_FILE", cfg.Host.SubGIDFile, DefaultSubGIDFile),
+		StorageConf:      strVal("PINP_STORAGE_CONF", cfg.Host.StorageConf, ""),
 		Store:            strVal("PINP_STORE", cfg.Host.Store, filepath.Join(home, ".local/share/containers/storage")),
 		StoreOpts:        strVal("PINP_STORE_OPTS", cfg.Host.StoreOpts, DefaultStoreOpts),
 		FuseDevice:       strVal("PINP_FUSE_DEVICE", cfg.Host.FuseDevice, DefaultFuseDevice),
