@@ -47,6 +47,7 @@ type Env struct {
 	GIDMapFile       string
 	Setcap           string
 	InnerMaps        []string
+	InnerMapsSet     bool
 	UsrShareDir      string
 	EtcDir           string
 	ConfigHome       string
@@ -77,6 +78,16 @@ func intEnv(name string, fallback int) (int, error) {
 		return 0, fmt.Errorf("invalid %s=%q: %w", name, v, err)
 	}
 	return n, nil
+}
+
+// innerMapsExplicit reports whether PINP_INNER_UIDMAPS or [l1] inner_uidmaps
+// was set. Only then does the static override win verbatim; otherwise pinp-i
+// derives target-aware inner maps for an explicit keep-id target.
+func innerMapsExplicit(cfg *wrapperConfig) bool {
+	if v, ok := os.LookupEnv("PINP_INNER_UIDMAPS"); ok && strings.TrimSpace(v) != "" {
+		return true
+	}
+	return cfg.L1.InnerUIDMaps != nil
 }
 
 func LoadEnv() (*Env, error) {
@@ -140,6 +151,7 @@ func LoadEnv() (*Env, error) {
 		GIDMapFile:       strVal("PINP_GID_MAP_FILE", cfg.Host.GIDMapFile, DefaultGIDMapFile),
 		Setcap:           strVal("PINP_SETCAP", cfg.Host.Setcap, DefaultSetcap),
 		InnerMaps:        strings.Fields(strVal("PINP_INNER_UIDMAPS", cfg.L1.InnerUIDMaps, DefaultInnerUIDMaps)),
+		InnerMapsSet:     innerMapsExplicit(cfg),
 		UsrShareDir:      strVal("PINP_USR_SHARE_CONTAINERS", cfg.Host.UsrShareContainers, "/usr/share/containers"),
 		EtcDir:           strVal("PINP_ETC_CONTAINERS", cfg.Host.EtcContainers, "/etc/containers"),
 		SELinux:          selinux,

@@ -252,6 +252,21 @@ func InnerRunArgs(env *Env) []string {
 	return args
 }
 
+// InnerMapsArgs renders separately derived uid and gid inner maps as repeated
+// --uidmap/--gidmap flags. Explicit keep-id targets need both because the
+// target UID and GID differ; the static fallback stays uidmap-only (podman
+// mirrors it to the gid map).
+func InnerMapsArgs(uidMaps, gidMaps []string) []string {
+	args := make([]string, 0, 2*(len(uidMaps)+len(gidMaps)))
+	for _, m := range uidMaps {
+		args = append(args, "--uidmap", m)
+	}
+	for _, m := range gidMaps {
+		args = append(args, "--gidmap", m)
+	}
+	return args
+}
+
 var flagAliases = map[string][]string{"--network": {"--net"}}
 
 func HasFlag(args []string, names ...string) bool {

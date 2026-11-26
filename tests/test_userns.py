@@ -64,24 +64,73 @@ def test_userns_modes_rejected_with_hint(
     assert "PINP_PASSTHROUGH=1" in result.stderr
 
 
-@pytest.mark.parametrize("mode", ["keep-id:uid=1000", "keep-id:uid=0,gid=0", "keep-id:size=8192"])
-def test_pinp_i_keeps_literal_keep_id_only(binaries: Path, tmp_path: Path, mode: str) -> None:
-    env = base_env(tmp_path)
-    result = run_wrapper(binaries, "pinp-i", ["run", f"--userns={mode}", "debian:latest"], env)
-    assert result.returncode != 0
-    assert "conflicting arguments" in result.stderr
-    assert "PINP_PASSTHROUGH=1" in result.stderr
+# base_env uses tester uid=1002 gid=1006 with a 65536-ID subordinate pool.
+L1_BARE_UID_MAPS = ["0:1:1002", "1002:0:1", "1003:1003:64530", "65534:65535:2"]
+L1_BARE_GID_MAPS = ["0:1:1006", "1006:0:1", "1007:1007:64526", "65534:65535:2"]
 
 
 @pytest.mark.parametrize("userns_args", [["--userns=keep-id"], ["--userns", "keep-id"]])
-def test_keep_id_is_stripped_on_l1(binaries: Path, tmp_path: Path, userns_args: list[str]) -> None:
+def test_keep_id_is_target_aware_on_l1(
+    binaries: Path, tmp_path: Path, userns_args: list[str]
+) -> None:
     env = base_env(tmp_path)
     result = run_wrapper(binaries, "pinp-i", ["run", *userns_args, "debian:latest"], env)
     argv = explained_argv(result)
     assert "--userns" not in argv
     assert "keep-id" not in argv
     assert argv[-1] == "debian:latest"
-    assert argv.count("--uidmap") == 2
+    assert argv.count("--uidmap") == 4
+    assert argv.count("--gidmap") == 4
+    for m in L1_BARE_UID_MAPS + L1_BARE_GID_MAPS:
+        assert m in argv
+
+
+def test_pinp_i_explicit_target(binaries: Path, tmp_path: Path) -> None:
+    env = base_env(tmp_path)
+    result = run_wrapper(
+        binaries,
+        "pinp-i",
+        ["run", "--userns=keep-id:uid=100,gid=200", "debian:latest"],
+        env,
+    )
+    argv = explained_argv(result)
+    assert "--userns" not in argv
+    assert "--uidmap" in argv and "--gidmap" in argv
+    assert argv.count("--uidmap") == 4
+    assert argv.count("--gidmap") == 4
+    assert "100:0:1" in argv
+    assert "200:0:1" in argv
+
+
+def test_pinp_i_size_option(binaries: Path, tmp_path: Path) -> None:
+    env = base_env(tmp_path)
+    result = run_wrapper(
+        binaries, "pinp-i", ["run", "--userns=keep-id:size=8192", "debian:latest"], env
+    )
+    argv = explained_argv(result)
+    # bare keep-id target 1002, size 8192 -> bulk capped at 8191 (parents 0..8190)
+    assert "1003:1003:7188" in argv
+    assert "65534:65535:2" in argv
+
+
+def test_pinp_i_size_above_pool_rejected(binaries: Path, tmp_path: Path) -> None:
+    env = base_env(tmp_path)
+    result = run_wrapper(
+        binaries, "pinp-i", ["run", "--userns=keep-id:size=70000", "debian:latest"], env
+    )
+    assert result.returncode != 0
+    assert "exceeds the L1 subordinate ID pool" in result.stderr
+
+
+def test_pinp_i_custom_inner_maps_override(binaries: Path, tmp_path: Path) -> None:
+    env = base_env(tmp_path)
+    env["PINP_INNER_UIDMAPS"] = "0:0:100 65534:100:2"
+    result = run_wrapper(
+        binaries, "pinp-i", ["run", "--userns=keep-id:uid=100,gid=100", "debian:latest"], env
+    )
+    argv = explained_argv(result)
+    assert "0:0:100" in argv and "65534:100:2" in argv
+    assert "--gidmap" not in argv
 
 
 @pytest.mark.parametrize("userns_args", [["--userns=keep-id"], ["--userns", "keep-id"]])

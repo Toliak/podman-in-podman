@@ -9,7 +9,7 @@ as_dev() {
 
 # No SELinux packages: this guest boots with selinux=0.
 dnf install -y --setopt=install_weak_deps=False \
-  podman crun fuse-overlayfs slirp4netns uidmap shadow-utils
+  podman crun fuse-overlayfs slirp4netns shadow-utils
 
 modprobe fuse || true
 [[ -c /dev/fuse ]] || mknod /dev/fuse c 10 229

@@ -54,9 +54,13 @@ func run() error {
 	}
 	if sub == "run" || sub == "create" {
 		tail := args[idx+1:]
+		var keep pinp.KeepID
+		userns := false
 		if value, start, end, found := pinp.FindUserns(tail); found {
-			if value != "keep-id" {
-				return fmt.Errorf("conflicting arguments already supplied: --userns=%s (unsupported: pinp needs its own uid maps for nested podman); set PINP_PASSTHROUGH=1 to bypass injection", value)
+			userns = true
+			keep, err = pinp.ParseKeepID(value, env.UID, env.GID, 0)
+			if err != nil {
+				return err
 			}
 			tail = pinp.StripUserns(tail, start, end)
 			args = append(args[:idx+1:idx+1], tail...)
@@ -68,7 +72,28 @@ func run() error {
 		if cfg, err := pinp.LoadEffectiveConfig(env); err == nil && env.InjectConfigArgs {
 			extra = append(extra, pinp.ConfigArgs(cfg, args, sub)...)
 		}
-		extra = append(extra, pinp.InnerRunArgs(env)...)
+		// No --userns flag keeps the static inner maps (semantically
+		// uid=0,gid=0); an explicit keep-id target is derived from L1's
+		// /etc/sub{u,g}id. An explicit PINP_INNER_UIDMAPS override wins verbatim.
+		if userns && !env.InnerMapsSet {
+			uidRanges, uidErr := pinp.ParseSubIDFile(env.SubUIDFile, env.User)
+			gidRanges, gidErr := pinp.ParseSubIDFile(env.SubGIDFile, env.User)
+			if uidErr != nil || gidErr != nil || len(uidRanges) == 0 || len(gidRanges) == 0 {
+				fmt.Fprintln(os.Stderr, "pinp-i: warning: cannot read L1 subordinate ID ranges; leaving the static inner uid maps (target-aware keep-id unavailable)")
+				extra = append(extra, pinp.InnerRunArgs(env)...)
+			} else {
+				uidMaps, gidMaps, warnings, err := pinp.DeriveInnerRunMaps(uidRanges, gidRanges, keep)
+				if err != nil {
+					return err
+				}
+				for _, w := range warnings {
+					fmt.Fprintln(os.Stderr, "pinp-i: warning:", w)
+				}
+				extra = append(extra, pinp.InnerMapsArgs(uidMaps, gidMaps)...)
+			}
+		} else {
+			extra = append(extra, pinp.InnerRunArgs(env)...)
+		}
 		args = pinp.InjectAt(args, idx, extra)
 	}
 	if sub == "build" && idx >= 0 {

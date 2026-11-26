@@ -62,8 +62,8 @@ emits a stderr warning but keeps the store enabled (it never disables it). Bare
 `keep-id:uid=U,gid=G` target additionally requires the L1 engine to run **as
 that UID `U`** (spike 3: the store is then owned by `U`). Root-in-L1 (rootful
 engine) is not a workaround — it fails at `crun: mount 'proc' to 'proc':
-Operation not permitted`. See `/tmp/opencode/pinp/userns-spike-3.md` and the
-deferred `pinp-i` TODO item.
+Operation not permitted`. See `/tmp/opencode/pinp/userns-spike-3.md` and
+`TODO.md` for the (now implemented) L1 inner policy.
 
 ## In the outer container (L1 image)
 
@@ -124,8 +124,9 @@ cannot use root-owned subordinate ranges. `pinp-i pinp-check`'s `subuid`/
 not image build: `/proc/self/uid_map` only shows the nested map once `pinp-e`
 has created L1. The SELinux L1 image keeps the hand-baked lines as a fallback
 (they also fit the `uid=0,gid=0` default when the shared store is not mounted);
-wiring the harness to `pinp-prepare --write` is deferred. Injection into
-`InnerRunArgs` stays static.
+wiring the harness to `pinp-prepare --write` is deferred. Injection into the
+default `InnerRunArgs` stays static; an explicit keep-id `--userns` derives
+target-aware maps (see the L2 section below).
 
 `pinp-i pinp-check` enforces exactly this (L1-only): it FAILs when either helper
 is setuid-root or lacks `cap_setuid=ep` / `cap_setgid=ep` file caps. On the host
@@ -195,11 +196,32 @@ shared-store caveat above.
 
 ## Running the inner container (L2)
 
-Run as the non-root user, with a `--uidmap` that fits the container's subuid
-ranges:
+Run as the non-root user. With **no `--userns` flag**, `pinp-i` injects the
+static maps below (semantically `uid=0,gid=0`):
 ```
 podman run --rm --uidmap 0:0:1500 --uidmap 65534:1500:2 debian:trixie echo "hello world"
 ```
+
+With an explicit `--userns=keep-id[:uid=U,gid=G][,size=S]`, `pinp-i` strips the
+flag and derives **separate** `--uidmap` + `--gidmap` extents from L1's
+`/etc/sub{u,g}id` so the L1 user's own id lands at container `U`/`G`. The parent
+field of an explicit inner `--uidmap` is an **offset into podman's rootless
+userns** (`0` = the L1 user's own id, `1..T` = the subordinate IDs sorted by
+start), not an absolute `/etc/subuid` value; the last two parents (`T-1`,`T`)
+always map container `65534..65535`. On the baked sparse pool (`T=33769`) the
+derived maps are, for example:
+```
+# no target rotation (uid=0,gid=0)
+--uidmap 0:0:1 --uidmap 1:1:33767 --uidmap 65534:33768:2
+# bare --userns=keep-id: own id at 1002 (uid) / 1006 (gid)
+--uidmap 0:1:1002 --uidmap 1002:0:1 --uidmap 1003:1003:32765 --uidmap 65534:33768:2
+--gidmap 0:1:1006 --gidmap 1006:0:1 --gidmap 1007:1007:32761 --gidmap 65534:33768:2
+```
+`size=S` caps the bulk (`S <= 1 + pool`); targets must stay `< bulk`. An
+explicit `PINP_INNER_UIDMAPS` / `[l1] inner_uidmaps` wins verbatim (uidmap-only,
+target-blind); an unreadable pool falls back to the static map with a WARN.
+`podman build` is unaffected — it uses the `buildmaps.go` `--userns-*-map`
+derivation and still rejects `--userns`.
 
 ## Quick sanity checks
 
