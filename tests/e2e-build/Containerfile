@@ -1,0 +1,16 @@
+FROM docker.io/library/debian:bookworm
+ENV DEBIAN_FRONTEND=noninteractive
+RUN printf 'APT::Sandbox::User "root";\n' > /etc/apt/apt.conf.d/99-no-sandbox
+RUN [ -f /etc/apt/apt.conf.d/docker-clean ] && \
+    mv /etc/apt/apt.conf.d/docker-clean /etc/apt/apt.conf.d/docker-clean.disabled || true
+RUN --mount=type=cache,sharing=locked,target=/var/cache/apt \
+    apt-get update -y --allow-releaseinfo-change && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates clang libc6-dev && \
+    rm -rf /var/lib/apt/lists/*
+RUN useradd --create-home --uid 1000 --shell /bin/sh builder
+USER builder
+WORKDIR /home/builder
+RUN printf '#include <stdio.h>\nint main(void) { puts("hello world"); return 0; }\n' > hello.c && \
+    clang -O2 -o hello hello.c
+CMD ["./hello"]

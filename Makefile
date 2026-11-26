@@ -4,7 +4,7 @@ UV ?= uv
 UV_RUN ?= $(UV) run --project tests --no-sync
 PYTEST_CONFIG ?= tests/pyproject.toml
 
-.PHONY: all build test lint vet clean selinux-test nonselinux-test sync
+.PHONY: all build test lint vet clean selinux-test nonselinux-test e2e-build sync
 
 all: build test lint
 
@@ -36,3 +36,6 @@ selinux-test: build sync
 
 nonselinux-test: build sync
 	PINP_NONSELINUX_TEST=1 $(UV_RUN) pytest -q -s -c $(PYTEST_CONFIG) -m nonselinux tests/nonselinux/test_nonselinux.py
+
+e2e-build: build sync
+	PINP_E2E_BUILD=1 $(UV_RUN) pytest -q -s -c $(PYTEST_CONFIG) -m e2e tests/test_e2e.py
