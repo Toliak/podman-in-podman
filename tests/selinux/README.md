@@ -86,7 +86,7 @@ Per case: `ls -Z` before/after the two bind sources, `podman image ls` `R/O=true
 - `:z` mutates labels of the VM's own image store; `:Z` assigns a private MCS that can break sharing. One fresh COW overlay per case avoids cross-contamination.
 - `--device /dev/fuse` into a confined container may be denied independently of `label=nested`; `run-case.sh` records that separately.
 - `pinp-outer` is Debian-based (no SELinux awareness). Labels are applied by the VM kernel to L1; `label=nested` is about the L1 process label permitting nested containers.
-- Sparse-`/etc/subuid` `podman build` failures are an unrelated unresolved spike — report them separately from AVCs.
+- Sparse-`/etc/subuid` `podman build` failures are handled by `pinp-i build`'s derived `--userns-*-map` injection (`buildmaps.go`); report any remaining build failures separately from AVCs.
 
 ## Result
 

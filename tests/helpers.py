@@ -97,6 +97,21 @@ def base_env(tmp_path: Path, *, sparse: bool = False) -> dict[str, str]:
     }
 
 
+def build_maps_env(tmp_path: Path) -> dict[str, str]:
+    """A sparse L1 subordinate-ID pool too small to reach container 65534.
+
+    Mirrors the baked /etc/sub{u,g}id in tests/selinux/guest/image: a low
+    1001-ID range plus a 32768-ID anchor (33769 total). The default rootless
+    build userns cannot map gid 65534, so pinp-i build must inject derived
+    --userns-uid-map / --userns-gid-map extents.
+    """
+    env = base_env(tmp_path)
+    content = "tester:100000:32768\ntester:1:1001\n"
+    (tmp_path / "subuid").write_text(content)
+    (tmp_path / "subgid").write_text(content)
+    return env
+
+
 def unset_config_env(tmp_path: Path) -> dict[str, str]:
     env = base_env(tmp_path)
     empty = tmp_path / "empty-config"

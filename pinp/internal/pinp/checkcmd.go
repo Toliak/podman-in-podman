@@ -12,15 +12,6 @@ import (
 
 var ErrCheckFailed = errors.New("preflight checks failed")
 
-func MaybeBuildSpike(env *Env) {
-	target, _ := ResolvePrepareTarget(env)
-	uidRanges, _ := ParseSubIDFile(env.SubUIDFile, target.User)
-	gidRanges, _ := ParseSubIDFile(env.SubGIDFile, target.User)
-	if len(uidRanges) > 1 || len(gidRanges) > 1 {
-		fmt.Fprintln(os.Stderr, BuildSpikeHint(uidRanges, gidRanges))
-	}
-}
-
 func RunCheckCommand(env *Env, args []string) error {
 	fs := pflag.NewFlagSet("pinp-i pinp-check", pflag.ContinueOnError)
 	fs.SetOutput(os.Stderr)

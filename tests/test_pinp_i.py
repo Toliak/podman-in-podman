@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers import base_env, config_env, explained_argv, run_wrapper
+from helpers import base_env, build_maps_env, config_env, explained_argv, run_wrapper
 
 
 def test_run_injection(binaries: Path, tmp_path: Path) -> None:
@@ -48,21 +48,64 @@ def test_custom_inner_maps(binaries: Path, tmp_path: Path) -> None:
     ]
 
 
-def test_build_passthrough_with_spike_hint(binaries: Path, tmp_path: Path) -> None:
-    env = base_env(tmp_path, sparse=True)
+def test_build_injects_derived_userns_maps(binaries: Path, tmp_path: Path) -> None:
+    env = build_maps_env(tmp_path)
     result = run_wrapper(binaries, "pinp-i", ["build", "-t", "x", "."], env)
-    argv = explained_argv(result)
-    assert argv == ["podman", "build", "-t", "x", "."]
-    assert "--uidmap" not in argv
-    assert "spike" in result.stderr.lower()
-    assert "userns-uid-map" in result.stderr
+    assert explained_argv(result) == [
+        "podman",
+        "build",
+        "--userns-uid-map",
+        "0:1:1001",
+        "--userns-uid-map",
+        "1001:1002:32766",
+        "--userns-uid-map",
+        "65534:33768:2",
+        "--userns-gid-map",
+        "0:1:1001",
+        "--userns-gid-map",
+        "1001:1002:32766",
+        "--userns-gid-map",
+        "65534:33768:2",
+        "-t",
+        "x",
+        ".",
+    ]
+    assert "spike" not in result.stderr.lower()
 
 
-def test_build_without_sparse_ranges_is_quiet(binaries: Path, tmp_path: Path) -> None:
+def test_build_wide_pool_is_quiet(binaries: Path, tmp_path: Path) -> None:
     env = base_env(tmp_path)
     result = run_wrapper(binaries, "pinp-i", ["build", "-t", "x", "."], env)
     assert result.returncode == 0
+    assert explained_argv(result) == ["podman", "build", "-t", "x", "."]
+    assert "--userns-uid-map" not in " ".join(explained_argv(result))
     assert "spike" not in result.stderr.lower()
+
+
+def test_pinp_build_maps_off(binaries: Path, tmp_path: Path) -> None:
+    env = build_maps_env(tmp_path)
+    env["PINP_BUILD_MAPS"] = "0"
+    result = run_wrapper(binaries, "pinp-i", ["build", "-t", "x", "."], env)
+    assert explained_argv(result) == ["podman", "build", "-t", "x", "."]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--userns-uid-map", "0:1:1001"],
+        ["--userns=host"],
+        ["--userns-gid-map-group=devuser"],
+        ["--isolation=chroot"],
+    ],
+)
+def test_build_conflicting_userns_flags_abort(
+    binaries: Path, tmp_path: Path, args: list[str]
+) -> None:
+    env = build_maps_env(tmp_path)
+    result = run_wrapper(binaries, "pinp-i", ["build", *args, "-t", "x", "."], env)
+    assert result.returncode != 0
+    assert "conflicting arguments already supplied" in result.stderr
+    assert "PINP_PASSTHROUGH" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -103,6 +146,23 @@ def test_check_json_structure(binaries: Path, stub_podman: Path, tmp_path: Path)
     assert "config cgroups" in names
     assert "newuidmap capabilities" in names
     assert "build readiness" in names
+
+
+def test_check_build_readiness_reports_injected_maps(
+    binaries: Path, stub_podman: Path, tmp_path: Path
+) -> None:
+    env = build_maps_env(tmp_path)
+    env["PINP_EXPLAIN"] = "0"
+    env["PINP_PODMAN"] = str(stub_podman)
+    result = run_wrapper(
+        binaries, "pinp-i", ["pinp-check", "--json", "--no-fail", "--only", "build readiness"], env
+    )
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert len(data["checks"]) == 1
+    check = data["checks"][0]
+    assert check["status"] == "pass", check
+    assert "--userns-uid-map 0:1:1001" in check["detail"]
 
 
 def test_check_text_output(binaries: Path, stub_podman: Path, tmp_path: Path) -> None:

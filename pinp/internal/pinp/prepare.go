@@ -249,8 +249,8 @@ func resolveTarget(env *Env, uidExtents, gidExtents []IDMapExtent, overrideUser 
 }
 
 // ResolvePrepareTarget reads the id-map files and resolves the target. Used by
-// the L1 preflight consistency check and the build-spike hint so they compare
-// against the same owner as pinp-prepare --write.
+// the L1 preflight consistency check so it compares against the same owner as
+// pinp-prepare --write.
 func ResolvePrepareTarget(env *Env) (PrepareTarget, []string) {
 	uidExtents, _ := ParseIDMapFile(env.UIDMapFile)
 	gidExtents, _ := ParseIDMapFile(env.GIDMapFile)

@@ -155,6 +155,40 @@ These keys are optional now: `pinp-i` injects the equivalent podman flags on
 *newly pulled* image writes, it does not add a read-only store — so it still needs
 `storage.conf` and the `/var/lib/shared` mount.
 
+### Sparse L1 build userns maps (`pinp-i build`)
+
+A rootless `buildah` maps container 0 to the L1 user's own id and container
+`1..T` to the `T` subordinate IDs from `/etc/sub{u,g}id`. apt's `http` method
+drops to `_apt` with `setgroups(65534)`, so a build fails with
+`E: setgroups 65534 failed` whenever `T < 65534`. With the baked sparse L1 pool
+(`1:1001` + `100000:32768`, `T=33769`) container gid 65534 is unmapped even
+though L1's own `/proc/self/gid_map` does map it.
+
+`pinp-i build` injects derived `--userns-uid-map` / `--userns-gid-map` extents in
+that case. The `hostID` in those triples is **not** the absolute `/etc/subuid`
+start value: it is an ID in buildah's own rootless userns (`U_build`), which
+numbers parent IDs sequentially from 1, one extent per range sorted by start.
+crun writes the RUN-step maps directly (no `newuidmap`) and the kernel rejects an
+extent whose parent range is out of `U_build`'s range or straddles two of its
+extents, so maps anchored at `100000` (absolute) or at `0` with a large size
+(offset) both fail `write file /proc/<pid>/gid_map: Operation not permitted`.
+
+For the baked pool `pinp-i` injects:
+```
+--userns-uid-map 0:1:1001 --userns-uid-map 1001:1002:32766 --userns-uid-map 65534:33768:2
+--userns-gid-map 0:1:1001 --userns-gid-map 1001:1002:32766 --userns-gid-map 65534:33768:2
+```
+uid and gid are derived separately (host UID != GID), one triple per range, the
+last two parent IDs reserved for the `65534:...:2` nobody extent, capped at the
+kernel's 5-extent limit. No injection when the pool is wide (`T >= 65534`): the
+default map already covers container 65534. `PINP_BUILD_MAPS=0` / `[l1]
+build_maps` disables it; caller-supplied `--userns*` / `--isolation` /
+`--uidmap` / `--gidmap` build flags abort with a passthrough hint.
+
+`tests/e2e-build/Containerfile` is the proof: a realistic apt + `useradd` +
+clang build with **no** `APT::Sandbox::User` workaround, run through
+`make e2e-build` inside a host-nested L1.
+
 `/var/lib/shared` mount point must exist and be owned by the user. With the
 `uid=0,gid=0` default the host store is root-owned inside L1 instead — see the
 shared-store caveat above.

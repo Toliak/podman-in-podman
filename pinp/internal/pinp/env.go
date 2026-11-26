@@ -53,6 +53,7 @@ type Env struct {
 	SELinux          string
 	SELinuxFS        string
 	InjectConfigArgs bool
+	InjectBuildMaps  bool
 }
 
 func boolEnv(name string) bool {
@@ -145,5 +146,6 @@ func LoadEnv() (*Env, error) {
 		SELinuxFS:        strVal("PINP_SELINUXFS", cfg.Host.SELinuxFS, "/sys/fs/selinux"),
 		ConfigHome:       configHome,
 		InjectConfigArgs: boolVal("PINP_CONFIG_ARGS", cfg.L1.ConfigArgs, true),
+		InjectBuildMaps:  boolVal("PINP_BUILD_MAPS", cfg.L1.BuildMaps, true),
 	}, nil
 }

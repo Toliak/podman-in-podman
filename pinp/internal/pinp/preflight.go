@@ -103,21 +103,6 @@ func sameRanges(a, b []Range) bool {
 	return true
 }
 
-func BuildSpikeHint(uidRanges, gidRanges []Range) string {
-	return strings.Join([]string{
-		"pinp-i build: sparse subordinate ID ranges detected; build handling is intentionally not implemented yet.",
-		fmt.Sprintf("  uid ranges: %s", formatRanges(uidRanges)),
-		fmt.Sprintf("  gid ranges: %s", formatRanges(gidRanges)),
-		"Spike inside L1 before deciding:",
-		"  1. podman build -f /tmp/spike/Containerfile /tmp/spike",
-		"  2. podman build --userns-uid-map 0:1:1001 --userns-uid-map 1001:100000:1000 --userns-gid-map 0:1:1001 --userns-gid-map 1001:100000:1000 -f /tmp/spike/Containerfile /tmp/spike",
-		"  3. podman build --userns-uid-map-user USER --userns-gid-map-group USER -f /tmp/spike/Containerfile /tmp/spike",
-		"  4. podman build --isolation=chroot -f /tmp/spike/Containerfile /tmp/spike",
-		"  5. collapse /etc/subuid and /etc/subgid to one contiguous range and repeat step 1",
-		"Record the exact error, whether newuidmap fails EPERM/EINVAL, and whether the 5-extent limit is hit.",
-	}, "\n")
-}
-
 func (r *Report) checkIDMapHelper(env *Env, name, path string, want capability.Cap, label string) {
 	r.addPath(name+" binary", path, true)
 	setuid, err := IsSetuid(path)
@@ -257,11 +242,8 @@ func RunChecks(env *Env) Report {
 
 	uidRanges := r.checkSubID("subuid", env.SubUIDFile, env.User)
 	gidRanges := r.checkSubID("subgid", env.SubGIDFile, env.User)
-	if len(uidRanges) > 1 || len(gidRanges) > 1 {
-		r.add("build readiness", StatusWarn, BuildSpikeHint(uidRanges, gidRanges))
-	} else {
-		r.add("build readiness", StatusPass, "single contiguous range; sparse-build spike still pending")
-	}
+	status, detail := BuildReadiness(env, uidRanges, gidRanges)
+	r.add("build readiness", status, detail)
 
 	if raw, err := os.ReadFile("/proc/sys/user/max_user_namespaces"); err == nil {
 		n, convErr := strconv.Atoi(strings.TrimSpace(string(raw)))

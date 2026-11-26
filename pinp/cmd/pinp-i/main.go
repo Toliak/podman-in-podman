@@ -75,15 +75,19 @@ func run() error {
 		if cfg, err := pinp.LoadEffectiveConfig(env); err == nil && env.InjectConfigArgs {
 			args = pinp.InjectAt(args, idx, pinp.ConfigArgs(cfg, args, "build"))
 		}
+		if env.InjectBuildMaps {
+			if conflicts := pinp.BuildConflicts(args); len(conflicts) > 0 {
+				return fmt.Errorf("conflicting arguments already supplied: %s; set PINP_PASSTHROUGH=1 to bypass injection", strings.Join(conflicts, ", "))
+			}
+			uid, gid, warnings := pinp.BuildMaps(env)
+			for _, w := range warnings {
+				fmt.Fprintln(os.Stderr, "pinp-i: warning:", w)
+			}
+			args = pinp.InjectAt(args, idx, pinp.BuildMapArgs(uid, gid))
+		}
 	}
 	if env.Explain {
-		if sub == "build" {
-			pinp.MaybeBuildSpike(env)
-		}
 		return pinp.Explain(env.Podman, args)
-	}
-	if sub == "build" {
-		pinp.MaybeBuildSpike(env)
 	}
 	if !env.SkipChecks && (sub == "run" || sub == "create" || sub == "build") {
 		report := pinp.RunChecks(env)

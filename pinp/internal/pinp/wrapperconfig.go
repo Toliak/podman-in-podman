@@ -41,6 +41,7 @@ type wrapperConfig struct {
 	L1 struct {
 		InnerUIDMaps *string `toml:"inner_uidmaps"`
 		ConfigArgs   *bool   `toml:"config_args"`
+		BuildMaps    *bool   `toml:"build_maps"`
 	} `toml:"l1"`
 }
 

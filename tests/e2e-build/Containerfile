@@ -1,6 +1,5 @@
 FROM docker.io/library/debian:bookworm
 ENV DEBIAN_FRONTEND=noninteractive
-RUN printf 'APT::Sandbox::User "root";\n' > /etc/apt/apt.conf.d/99-no-sandbox
 RUN [ -f /etc/apt/apt.conf.d/docker-clean ] && \
     mv /etc/apt/apt.conf.d/docker-clean /etc/apt/apt.conf.d/docker-clean.disabled || true
 RUN --mount=type=cache,sharing=locked,target=/var/cache/apt \
