@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/user"
 	"strconv"
 	"strings"
 )
@@ -14,6 +15,12 @@ type Range struct {
 }
 
 func ParseSubIDFile(path, userName string) ([]Range, error) {
+	// Match the numeric uid too, mirroring containers/storage idtools. This lets
+	// a numeric line written before useradd (or a numeric owner) validate.
+	uidStr := ""
+	if u, err := user.Lookup(userName); err == nil {
+		uidStr = u.Uid
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -27,7 +34,11 @@ func ParseSubIDFile(path, userName string) ([]Range, error) {
 			continue
 		}
 		parts := strings.Split(line, ":")
-		if len(parts) != 3 || strings.TrimSpace(parts[0]) != userName {
+		if len(parts) != 3 {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		if name != userName && (uidStr == "" || name != uidStr) {
 			continue
 		}
 		start, err := strconv.Atoi(strings.TrimSpace(parts[1]))

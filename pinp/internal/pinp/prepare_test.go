@@ -302,37 +302,49 @@ func TestDeriveAdditionalStores(t *testing.T) {
 }
 
 func TestStorageConfContent(t *testing.T) {
-	got := StorageConfContent([]string{"/other", "/var/lib/shared"})
-	want := "[storage.options]\nadditionalimagestores = [\n    \"/other\",\n    \"/var/lib/shared\",\n]\n"
+	got := StorageConfContent("overlay", "/usr/local/bin/fuse-overlayfs", []string{"/other", "/var/lib/shared"})
+	want := "[storage]\ndriver = \"overlay\"\n\n[storage.options]\nadditionalimagestores = [\n    \"/other\",\n    \"/var/lib/shared\",\n]\n\n[storage.options.overlay]\nmount_program = \"/usr/local/bin/fuse-overlayfs\"\n"
 	if got != want {
 		t.Fatalf("StorageConfContent = %q, want %q", got, want)
+	}
+	if got := StorageConfContent("overlay", "/usr/local/bin/fuse-overlayfs", nil); got != "[storage]\ndriver = \"overlay\"\n\n[storage.options.overlay]\nmount_program = \"/usr/local/bin/fuse-overlayfs\"\n" {
+		t.Fatalf("storage-only content = %q", got)
 	}
 }
 
 func TestStoragePaths(t *testing.T) {
 	env := &Env{Home: "/home/fallback"}
 	target := PrepareTarget{Home: "/home/devuser"}
-	conf := storageConfPath(env, target)
-	if conf != "/home/devuser/.config/containers/storage.conf" {
-		t.Fatalf("storageConfPath = %q", conf)
+	conf, err := storageConfPath(env, target)
+	if err != nil || conf != "/home/devuser/.config/containers/storage.conf" {
+		t.Fatalf("storageConfPath = %q, %v", conf, err)
 	}
 	if drop := storageDropInPath(conf); drop != "/home/devuser/.config/containers/storage.conf.d/pinp-shared-store.conf" {
 		t.Fatalf("storageDropInPath = %q", drop)
 	}
 	env.StorageConf = "/custom/storage.conf"
-	if got := storageConfPath(env, target); got != "/custom/storage.conf" {
-		t.Fatalf("override storageConfPath = %q", got)
+	if got, err := storageConfPath(env, target); err != nil || got != "/custom/storage.conf" {
+		t.Fatalf("override storageConfPath = %q, %v", got, err)
 	}
 	target.Home = ""
-	if got := storageConfPath(&Env{Home: "/home/fallback"}, target); got != "/home/fallback/.config/containers/storage.conf" {
-		t.Fatalf("fallback storageConfPath = %q", got)
+	if _, err := storageConfPath(&Env{Home: "/home/fallback"}, target); err == nil {
+		t.Fatal("expected an error when the target home is unknown")
+	}
+}
+
+func TestMergeSubIDContent(t *testing.T) {
+	existing := "# keep\ndevuser:5:10\nother:100:10\n1002:100000:1000\n"
+	got := MergeSubIDContent(existing, "devuser", 1002, []Range{{Start: 100000, Size: 65536}})
+	want := "# keep\nother:100:10\ndevuser:100000:65536\n"
+	if got != want {
+		t.Fatalf("MergeSubIDContent = %q, want %q", got, want)
 	}
 }
 
 func TestWriteStorageDropInIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/storage.conf.d/pinp-shared-store.conf"
-	content := StorageConfContent([]string{"/var/lib/shared"})
+	content := StorageConfContent("overlay", "/usr/local/bin/fuse-overlayfs", []string{"/var/lib/shared"})
 	target := PrepareTarget{UID: os.Getuid(), GID: os.Getgid()}
 	if w := writeStorageDropIn(path, content, target); w != "" {
 		t.Fatalf("writeStorageDropIn warn = %q", w)

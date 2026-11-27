@@ -146,27 +146,60 @@ These keys are optional now: `pinp-i` injects the equivalent podman flags on
 `run`/`create`/`build` whenever the merged effective config leaves a key unset
 (`--network host`, `--ipc host`, `--uts host`, `--cgroupns host`, `--pid host`,
 `--cgroups enabled`, `--log-driver k8s-file`, `--runtime crun`,
-`--cgroup-manager cgroupfs`, `--events-backend file`, `--storage-driver overlay`,
-`--storage-opt overlay.mount_program=...`). `podman build` gets the same list minus
-`--cgroups` / `--log-driver`. The full mapping lives in
+`--cgroup-manager cgroupfs`, `--events-backend file`). `podman build` gets the
+same list minus `--cgroups` / `--log-driver`. The full mapping lives in
 `pinp/internal/pinp/config.go`; `PINP_CONFIG_ARGS=0` disables it. Unset keys are
 `WARN` in `pinp-i pinp-check`, not `FAIL`.
 
-`additionalimagestores` has no CLI equivalent — `podman --imagestore` redirects
-*newly pulled* image writes, it does not add a read-only store — so it still needs
-`storage.conf` and the `/var/lib/shared` mount.
+Storage settings are **never** injected on the CLI. Podman's `--storage-driver`
+makes it ignore the driver options from `storage.conf`, and `--storage-opt`
+replaces `GraphDriverOptions` wholesale, which would drop
+`additionalimagestores` and `mount_program` (verified in podman 6.0.2
+`pkg/domain/infra/runtime_libpod.go`). `additionalimagestores` also has no CLI
+equivalent — `podman --imagestore` redirects *newly pulled* image writes, it does
+not add a read-only store — so the shared store still needs `storage.conf` plus
+the `/var/lib/shared` mount.
 
-`pinp-i pinp-prepare` can generate that config instead of baking it. When
-`/var/lib/shared` is a mount point (checked via `/proc/self/mountinfo`), the
-default `pinp-prepare` output and `--write` include an additive drop-in at
-`<target home>/.config/containers/storage.conf.d/pinp-shared-store.conf`
-containing the **union** of the effective `additionalimagestores` and the shared
-store. It writes to the mapped L1 user's home (not root's, not `/etc`), because
-rootless podman reads `$XDG_CONFIG_HOME/containers/storage.conf.d`; `--write`
-creates it `0644` and chowns it to that user when running as root. When the store
-is unmounted the generation is skipped with an INFO. `PINP_STORAGE_CONF` /
+`pinp-i pinp-prepare` generates that storage config instead of baking it. The
+default output and `--write` include a drop-in at
+`<target home>/.config/containers/storage.conf.d/pinp-shared-store.conf` with
+`driver = "overlay"`, `mount_program = <resolved fuse-overlayfs>` and — only when
+`/var/lib/shared` is a mount point (checked via `/proc/self/mountinfo`) —
+`additionalimagestores` = the **union** of the effective stores and the shared
+store. `fuse-overlayfs` is resolved by `PINP_FUSE_OVERLAYFS` / `[host]
+fuse_overlayfs` > effective `storage.conf mount_program` > `exec.LookPath`
+(PATH only; no hardcoded `/usr/bin`). It writes to the mapped L1 user's home
+(not root's, not `/etc`), because rootless podman reads
+`$XDG_CONFIG_HOME/containers/storage.conf.d`; the home must be resolvable, so run
+`pinp-prepare` **after** `useradd` or pass `--home`. `--write` creates it `0644`
+and chowns it to that user when running as root. `PINP_STORAGE_CONF` /
 `[host] storage_conf` override the main `storage.conf` path (the drop-in dir is
-derived from its parent), and `pinp-i pinp-check` reports a `storage.conf` line.
+derived from its parent), and `pinp-i pinp-check` reports `storage.conf`,
+`config driver`, `config mount_program`, and `additionalimagestores loaded`
+(from `podman info` `store.graphOptions`, so an ignored drop-in is caught).
+It also WARNs when `CONTAINERS_STORAGE_CONF` is set, since that disables
+`storage.conf.d` drop-ins.
+
+`pinp-prepare --write` **merges** `/etc/subuid` / `/etc/subgid`, replacing only
+the target user's lines (matched by name or numeric uid), so apt-installed
+`_apt` / `useradd` entries survive.
+
+### Using `pinp-i` in a raw container
+
+The wrappers do not assume the repo's baked L1 image. In a stock `debian`
+container started with `pinp-e ... --userns=keep-id:uid=1000,gid=1000`, create
+the user first, then prepare:
+
+```sh
+apt-get update && apt-get install -y podman uidmap fuse-overlayfs
+groupadd -g 1000 user && useradd -m -u 1000 -g 1000 user
+pinp-i pinp-prepare --write --user user      # writes /etc/subuid, caps, storage drop-in
+su user -c 'pinp-i pinp-check --json --no-fail'
+su user -c 'podman run ...'
+```
+
+Preparing before `useradd` needs `--home /home/user`, otherwise `pinp-prepare`
+errors instead of dropping the drop-in into `/root`.
 
 ### Sparse L1 build userns maps (`pinp-i build`)
 

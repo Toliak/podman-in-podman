@@ -76,8 +76,6 @@ func TestConfigArgs(t *testing.T) {
 		"--runtime", "crun",
 		"--cgroup-manager", "cgroupfs",
 		"--events-backend", "file",
-		"--storage-driver", "overlay",
-		"--storage-opt", "overlay.mount_program=/usr/bin/fuse-overlayfs",
 	}
 	wantBuild := []string{
 		"--network", "host",
@@ -88,8 +86,6 @@ func TestConfigArgs(t *testing.T) {
 		"--runtime", "crun",
 		"--cgroup-manager", "cgroupfs",
 		"--events-backend", "file",
-		"--storage-driver", "overlay",
-		"--storage-opt", "overlay.mount_program=/usr/bin/fuse-overlayfs",
 	}
 
 	t.Run("fully-configured-empty", func(t *testing.T) {
@@ -103,8 +99,8 @@ func TestConfigArgs(t *testing.T) {
 		if !equalSlices(got, wantRun) {
 			t.Fatalf("ConfigArgs(empty, run) = %v, want %v", got, wantRun)
 		}
-		if len(got) != 24 {
-			t.Fatalf("ConfigArgs(empty, run) has %d tokens, want 24", len(got))
+		if len(got) != 20 {
+			t.Fatalf("ConfigArgs(empty, run) has %d tokens, want 20", len(got))
 		}
 	})
 
@@ -113,8 +109,8 @@ func TestConfigArgs(t *testing.T) {
 		if !equalSlices(got, wantBuild) {
 			t.Fatalf("ConfigArgs(empty, build) = %v, want %v", got, wantBuild)
 		}
-		if len(got) != 20 {
-			t.Fatalf("ConfigArgs(empty, build) has %d tokens, want 20", len(got))
+		if len(got) != 16 {
+			t.Fatalf("ConfigArgs(empty, build) has %d tokens, want 16", len(got))
 		}
 		if containsToken(got, "--cgroups") || containsToken(got, "--log-driver") {
 			t.Fatalf("ConfigArgs(empty, build) must not contain --cgroups or --log-driver: %v", got)
@@ -128,8 +124,8 @@ func TestConfigArgs(t *testing.T) {
 		if !equalSlices(got, wantRun[2:]) {
 			t.Fatalf("ConfigArgs(netns, run) = %v, want %v", got, wantRun[2:])
 		}
-		if len(got) != 22 {
-			t.Fatalf("ConfigArgs(netns, run) has %d tokens (11 settings), want 22", len(got))
+		if len(got) != 18 {
+			t.Fatalf("ConfigArgs(netns, run) has %d tokens (9 settings), want 18", len(got))
 		}
 		if containsToken(got, "--network") {
 			t.Fatalf("ConfigArgs(netns, run) must not inject --network: %v", got)
@@ -158,8 +154,8 @@ func TestConfigArgs(t *testing.T) {
 		if containsToken(got, "--runtime") {
 			t.Fatalf("caller --runtime=runc must suppress --runtime: %v", got)
 		}
-		if len(got) != 22 {
-			t.Fatalf("ConfigArgs with --runtime=runc has %d tokens, want 22", len(got))
+		if len(got) != 18 {
+			t.Fatalf("ConfigArgs with --runtime=runc has %d tokens, want 18", len(got))
 		}
 	})
 }

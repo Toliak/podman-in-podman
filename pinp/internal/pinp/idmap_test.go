@@ -2,6 +2,7 @@ package pinp
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -26,6 +27,26 @@ func TestParseSubIDFile(t *testing.T) {
 	}
 	if total := TotalSize(ranges); total != 33769 {
 		t.Fatalf("TotalSize = %d, want 33769", total)
+	}
+}
+
+func TestParseSubIDFileMatchesNumericUID(t *testing.T) {
+	current, err := user.Current()
+	if err != nil {
+		t.Skipf("no current user: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "subuid")
+	content := current.Uid + ":100000:65536\nother:5:10\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ranges, err := ParseSubIDFile(path, current.Username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ranges) != 1 || ranges[0] != (Range{Start: 100000, Size: 65536}) {
+		t.Fatalf("numeric uid match = %v", ranges)
 	}
 }
 

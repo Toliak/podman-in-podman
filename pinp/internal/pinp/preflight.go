@@ -203,6 +203,26 @@ func RunChecks(env *Env) Report {
 		for _, s := range ConfigSettings {
 			r.expectSetting(cfg, s)
 		}
+		// Storage settings are not injected on the CLI (that would wipe
+		// additionalimagestores); pinp-prepare writes them instead.
+		if d := cfg.Storage.Storage.Driver; d == "overlay" {
+			r.add("config driver", StatusPass, d)
+		} else if d == "" {
+			r.add("config driver", StatusWarn, "not set; run pinp-i pinp-prepare --write")
+		} else {
+			r.add("config driver", StatusWarn, fmt.Sprintf("%q, expected %q; run pinp-i pinp-prepare --write", d, "overlay"))
+		}
+		mountProgram := cfg.Storage.Storage.Options.Overlay.MountProgram
+		if mountProgram != "" {
+			r.add("config mount_program", StatusPass, mountProgram)
+		} else if path, err := ResolveFuseOverlayFS(env, cfg); err == nil {
+			r.add("config mount_program", StatusWarn, fmt.Sprintf("not set; resolved %s from PATH; run pinp-i pinp-prepare --write to pin it", path))
+		} else {
+			r.add("config mount_program", StatusWarn, "not set; run pinp-i pinp-prepare --write")
+		}
+		if v := os.Getenv("CONTAINERS_STORAGE_CONF"); v != "" {
+			r.add("storage.conf override", StatusWarn, fmt.Sprintf("CONTAINERS_STORAGE_CONF=%s disables storage.conf.d drop-ins; pinp-prepare cannot add additionalimagestores there", v))
+		}
 		if cfg.Containers.Containers.UserNS != "" {
 			r.add("config userns", StatusWarn, fmt.Sprintf("containers.conf userns=%q would collide with injected --uidmap and is silently overridden", cfg.Containers.Containers.UserNS))
 		}
@@ -215,24 +235,40 @@ func RunChecks(env *Env) Report {
 			r.add("config additionalimagestores", StatusWarn, "not set; no podman CLI equivalent; mount /var/lib/shared in L1")
 		}
 		target, _ := ResolvePrepareTarget(env)
-		storageConf := storageConfPath(env, target)
-		dropIn := storageDropInPath(storageConf)
-		if mounted, err := IsMountPoint(env.SharedStore); err != nil {
+		storageConf, confErr := storageConfPath(env, target)
+		mounted := false
+		if confErr != nil {
+			r.add("storage.conf", StatusWarn, confErr.Error())
+		} else if isMounted, err := IsMountPoint(env.SharedStore); err != nil {
 			r.add("storage.conf", StatusWarn, fmt.Sprintf("cannot read mount info: %v", err))
-		} else if !mounted {
+		} else if !isMounted {
 			r.add("storage.conf", StatusPass, env.SharedStore+" is not mounted; shared store disabled")
-		} else if _, err := os.Stat(dropIn); err == nil {
-			r.add("storage.conf", StatusPass, dropIn)
-		} else if hasString(cfg.Storage.Storage.Options.AdditionalImageStores, env.SharedStore) {
-			r.add("storage.conf", StatusPass, "additionalimagestores configured in effective config")
 		} else {
-			r.add("storage.conf", StatusWarn, fmt.Sprintf("mounted but not configured; run pinp-prepare --write (expected %s)", filepath.Clean(dropIn)))
+			mounted = true
+			dropIn := storageDropInPath(storageConf)
+			if _, err := os.Stat(dropIn); err == nil {
+				r.add("storage.conf", StatusPass, dropIn)
+			} else if hasString(cfg.Storage.Storage.Options.AdditionalImageStores, env.SharedStore) {
+				r.add("storage.conf", StatusPass, "additionalimagestores configured in effective config")
+			} else {
+				r.add("storage.conf", StatusWarn, fmt.Sprintf("mounted but not configured; run pinp-i pinp-prepare --write (expected %s)", filepath.Clean(dropIn)))
+			}
 		}
-		mountProgram := cfg.Storage.Storage.Options.Overlay.MountProgram
-		if mountProgram == "" {
-			mountProgram = "/usr/bin/fuse-overlayfs"
+		if mounted && infoErr == nil && info != nil {
+			if hasString(cfg.Storage.Storage.Options.AdditionalImageStores, env.SharedStore) {
+				stores := info.AdditionalImageStores()
+				if hasString(stores, env.SharedStore) {
+					r.add("additionalimagestores loaded", StatusPass, env.SharedStore)
+				} else {
+					r.add("additionalimagestores loaded", StatusWarn, fmt.Sprintf("%s configured but not loaded by podman (loaded: %v); check CONTAINERS_STORAGE_CONF and drop-in precedence", env.SharedStore, stores))
+				}
+			}
 		}
-		r.addPath("fuse-overlayfs", mountProgram, true)
+		if path, err := ResolveFuseOverlayFS(env, cfg); err != nil {
+			r.add("fuse-overlayfs", StatusFail, err.Error())
+		} else {
+			r.addPath("fuse-overlayfs", path, true)
+		}
 	}
 
 	r.checkIDMapHelper(env, "newuidmap", env.NewUIDMap, capability.CAP_SETUID, "cap_setuid")

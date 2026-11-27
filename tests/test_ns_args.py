@@ -18,8 +18,6 @@ CONFIG_FLAG_NAMES = [
     "--runtime",
     "--cgroup-manager",
     "--events-backend",
-    "--storage-driver",
-    "--storage-opt",
 ]
 
 
@@ -53,10 +51,6 @@ def test_run_injects_all_config_args(binaries: Path, tmp_path: Path) -> None:
         "cgroupfs",
         "--events-backend",
         "file",
-        "--storage-driver",
-        "overlay",
-        "--storage-opt",
-        "overlay.mount_program=/usr/bin/fuse-overlayfs",
         "--uidmap",
         "0:0:1500",
         "--uidmap",
@@ -98,10 +92,6 @@ def test_build_injects_build_subset(binaries: Path, tmp_path: Path) -> None:
         "cgroupfs",
         "--events-backend",
         "file",
-        "--storage-driver",
-        "overlay",
-        "--storage-opt",
-        "overlay.mount_program=/usr/bin/fuse-overlayfs",
         "-t",
         "x",
         ".",

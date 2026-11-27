@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from helpers import config_env, run_wrapper
+from helpers import config_env, run_wrapper, unset_config_env
 
 
 def check_map(binaries: Path, env: dict[str, str]) -> dict[str, dict[str, str]]:
@@ -67,6 +67,21 @@ def test_dropins_are_sorted_and_override_main(
     checks = check_map(binaries, env)
     assert checks["config cgroups"]["status"] == "pass"
     assert "enabled" in checks["config cgroups"]["detail"]
+
+
+def test_storage_keys_unset_warn_prepare(binaries: Path, stub_podman: Path, tmp_path: Path) -> None:
+    env = unset_config_env(tmp_path)
+    env["PINP_EXPLAIN"] = "0"
+    env["PINP_PODMAN"] = str(stub_podman)
+    for key in ("config driver", "config mount_program"):
+        result = run_wrapper(
+            binaries, "pinp-i", ["pinp-check", "--json", "--no-fail", "--only", key], env
+        )
+        assert result.returncode == 0, result.stderr
+        check = json.loads(result.stdout)["checks"][0]
+        assert check["name"] == key
+        assert check["status"] == "warn"
+        assert "pinp-prepare" in check["detail"]
 
 
 def test_storage_config_is_read(binaries: Path, stub_podman: Path, tmp_path: Path) -> None:

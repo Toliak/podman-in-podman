@@ -68,9 +68,13 @@ var ConfigSettings = []ConfigSetting{
 	{Key: "runtime", Want: "crun", Flags: []string{"--runtime", "crun"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Engine.Runtime }},
 	{Key: "cgroup_manager", Want: "cgroupfs", Flags: []string{"--cgroup-manager", "cgroupfs"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Engine.CgroupManager }},
 	{Key: "events_logger", Want: "file", Flags: []string{"--events-backend", "file"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Containers.Engine.EventsLogger }},
-	{Key: "driver", Want: "overlay", Flags: []string{"--storage-driver", "overlay"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Storage.Storage.Driver }},
-	{Key: "mount_program", Want: "/usr/bin/fuse-overlayfs", Flags: []string{"--storage-opt", "overlay.mount_program=/usr/bin/fuse-overlayfs"}, Build: true, Get: func(c *EffectiveConfig) string { return c.Storage.Storage.Options.Overlay.MountProgram }},
 }
+
+// Storage settings are intentionally NOT injected on the CLI: podman treats
+// --storage-driver as "ignore the driver options from storage.conf" and
+// --storage-opt as a full replacement of GraphDriverOptions, which drops
+// additionalimagestores and mount_program. pinp-prepare therefore writes them
+// into a storage.conf drop-in instead; preflight only reports their state.
 
 func loadContainersInto(path string, dst *ContainersConfig) error {
 	var fresh ContainersConfig

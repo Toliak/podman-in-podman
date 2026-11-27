@@ -78,6 +78,9 @@ def base_env(tmp_path: Path, *, sparse: bool = False) -> dict[str, str]:
         '[storage.options]\nadditionalimagestores=["/var/lib/shared"]\n'
         '[storage.options.overlay]\nmount_program="/usr/bin/fuse-overlayfs"\n'
     )
+    fuse = tmp_path / "fuse-overlayfs"
+    fuse.write_text("#!/bin/sh\nexit 0\n")
+    fuse.chmod(0o755)
     return {
         "PINP_EXPLAIN": "1",
         "PINP_UID": "1002",
@@ -93,6 +96,7 @@ def base_env(tmp_path: Path, *, sparse: bool = False) -> dict[str, str]:
         "HOME": str(home),
         "PINP_USR_SHARE_CONTAINERS": str(usr),
         "PINP_ETC_CONTAINERS": str(etc),
+        "PINP_FUSE_OVERLAYFS": str(fuse),
         "XDG_CONFIG_HOME": str(home / ".config"),
     }
 

@@ -231,6 +231,8 @@ def test_default_prints_storage_conf(binaries: Path, tmp_path: Path) -> None:
     result = _prepare(binaries, tmp_path)
     assert result.returncode == 0, result.stderr
     assert str(_storage_conf(tmp_path)) in result.stdout
+    assert 'driver = "overlay"' in result.stdout
+    assert "mount_program = " in result.stdout
     assert "additionalimagestores = [" in result.stdout
     assert '"/var/lib/shared"' in result.stdout
 
@@ -266,6 +268,8 @@ def test_write_creates_storage_conf(binaries: Path, tmp_path: Path) -> None:
     conf = _storage_conf(tmp_path)
     assert conf.exists()
     content = conf.read_text()
+    assert '[storage]\ndriver = "overlay"' in content
+    assert "mount_program = " in content
     assert "[storage.options]" in content
     assert '"/var/lib/shared"' in content
     assert "warning" not in result.stderr
@@ -280,14 +284,27 @@ def test_write_storage_conf_idempotent(binaries: Path, tmp_path: Path) -> None:
     assert _storage_conf(tmp_path).read_text() == first
 
 
-def test_storage_conf_skipped_when_unmounted(binaries: Path, tmp_path: Path) -> None:
+def test_storage_conf_without_shared_store_still_written(binaries: Path, tmp_path: Path) -> None:
     env = prepare_env(tmp_path, shared_mounted=False)
     result = _prepare(binaries, tmp_path, "--write", env=env)
     assert result.returncode == 0, result.stderr
-    assert not _storage_conf(tmp_path).exists()
     assert "info:" in result.stderr
     assert "not a mount point" in result.stderr
     assert "warning" not in result.stderr
+    content = _storage_conf(tmp_path).read_text()
+    assert 'driver = "overlay"' in content
+    assert "mount_program = " in content
+    assert "additionalimagestores" not in content
+
+
+def test_storage_conf_requires_home(binaries: Path, tmp_path: Path) -> None:
+    uid_map = "0 1 1002\n65000 0 1\n65534 65534 2\n100000 1003 64531\n"
+    gid_map = "0 1 1006\n65001 0 1\n65534 65534 2\n100000 1007 64527\n"
+    env = prepare_env(tmp_path, with_identity=False, uid_map=uid_map, gid_map=gid_map)
+    env.pop("PINP_STORAGE_CONF", None)
+    result = _prepare(binaries, tmp_path, "--write", env=env)
+    assert result.returncode != 0
+    assert "--home" in result.stderr
 
 
 def test_storage_conf_union_preserves_existing(binaries: Path, tmp_path: Path) -> None:

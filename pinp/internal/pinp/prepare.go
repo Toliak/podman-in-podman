@@ -133,29 +133,43 @@ func DeriveAdditionalStores(existing []string, shared string) []string {
 	return out
 }
 
-// StorageConfContent renders an additionalimagestores drop-in.
-func StorageConfContent(stores []string) string {
+// StorageConfContent renders the storage.conf drop-in pinp-prepare writes. The
+// driver and mount_program are always present; additionalimagestores is emitted
+// only when it is non-empty (a missing image store path makes podman fail).
+func StorageConfContent(driver, mountProgram string, stores []string) string {
 	var b strings.Builder
-	b.WriteString("[storage.options]\nadditionalimagestores = [\n")
-	for _, store := range stores {
-		fmt.Fprintf(&b, "    %q,\n", store)
+	b.WriteString("[storage]\n")
+	fmt.Fprintf(&b, "driver = %q\n", driver)
+	if len(stores) > 0 {
+		b.WriteString("\n[storage.options]\nadditionalimagestores = [\n")
+		for _, store := range stores {
+			fmt.Fprintf(&b, "    %q,\n", store)
+		}
+		b.WriteString("]\n")
 	}
-	b.WriteString("]\n")
+	if mountProgram != "" {
+		b.WriteString("\n[storage.options.overlay]\n")
+		fmt.Fprintf(&b, "mount_program = %q\n", mountProgram)
+	}
 	return b.String()
 }
 
 // storageConfPath resolves the storage.conf that the L1 rootless engine reads.
 // An explicit override wins; otherwise it is the mapped user's
 // ~/.config/containers/storage.conf (not root's, even when --write runs as root).
-func storageConfPath(env *Env, target PrepareTarget) string {
+// The home must be resolvable so a raw-container --write run as root never
+// silently drops the drop-in into /root; --home or a post-useradd run fixes it.
+func storageConfPath(env *Env, target PrepareTarget) (string, error) {
 	if env.StorageConf != "" {
-		return env.StorageConf
+		return env.StorageConf, nil
 	}
-	home := target.Home
-	if home == "" {
-		home = env.Home
+	if target.Home == "" {
+		return "", fmt.Errorf("cannot resolve the storage.conf home for %q; run pinp-i pinp-prepare after creating the user, or pass --home", target.User)
 	}
-	return filepath.Join(home, ".config", "containers", "storage.conf")
+	if env.Home != "" && target.Home == env.Home && os.Getenv("XDG_CONFIG_HOME") != "" {
+		return filepath.Join(env.ConfigHome, "storage.conf"), nil
+	}
+	return filepath.Join(target.Home, ".config", "containers", "storage.conf"), nil
 }
 
 // storageDropInPath is the non-destructive drop-in carrying additionalimagestores
@@ -164,14 +178,24 @@ func storageDropInPath(storageConf string) string {
 	return filepath.Join(filepath.Dir(storageConf), "storage.conf.d", "pinp-shared-store.conf")
 }
 
-// effectiveStores reads the additionalimagestores podman would use for the
-// target user. It points ConfigHome at the target's containers dir so a
+// effectiveConfigFor reads the containers/storage config podman would use for
+// the target user. It points ConfigHome at the target's containers dir so a
 // root-running --write does not read root's config.
-func effectiveStores(env *Env, storageConf string) []string {
+func effectiveConfigFor(env *Env, storageConf string) *EffectiveConfig {
 	probe := *env
 	probe.ConfigHome = filepath.Dir(storageConf)
 	cfg, err := LoadEffectiveConfig(&probe)
 	if err != nil {
+		return nil
+	}
+	return cfg
+}
+
+// effectiveStores reads the additionalimagestores podman would use for the
+// target user.
+func effectiveStores(env *Env, storageConf string) []string {
+	cfg := effectiveConfigFor(env, storageConf)
+	if cfg == nil {
 		return nil
 	}
 	return cfg.Storage.Storage.Options.AdditionalImageStores
@@ -317,6 +341,44 @@ func SubIDFileContent(user string, ranges []Range) string {
 	return b.String()
 }
 
+// MergeSubIDContent replaces only the target user's lines in an existing
+// /etc/sub{u,g}id file, preserving unrelated entries (_apt, other users) and
+// comments. A line matches the target when its first field is the username or
+// its numeric uid, mirroring containers/storage, so a numeric line written
+// before useradd is not duplicated.
+func MergeSubIDContent(existing, user string, uid int, ranges []Range) string {
+	uidStr := strconv.Itoa(uid)
+	var b strings.Builder
+	for _, line := range strings.Split(existing, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		parts := strings.Split(trimmed, ":")
+		if len(parts) == 3 && (parts[0] == user || parts[0] == uidStr) {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString(SubIDFileContent(user, ranges))
+	return b.String()
+}
+
+// writeSubIDFile merges the derived ranges into the file instead of truncating
+// it, so apt-installed or useradd-added entries survive a pinp-prepare run.
+func writeSubIDFile(path, user string, uid int, ranges []Range) error {
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	content := MergeSubIDContent(string(existing), user, uid, ranges)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
 // CapCommands returns the shell commands that (re)apply file capabilities to
 // the id-map helpers, mirroring tests/selinux/guest/image/Containerfile.
 func CapCommands(env *Env, uid, gid bool) []string {
@@ -409,8 +471,6 @@ func resolveTarget(env *Env, uidExtents, gidExtents []IDMapExtent, overrideUser 
 	}
 	if home, ok := lookupUserHome(target.User); ok {
 		target.Home = home
-	} else {
-		target.Home = env.Home
 	}
 	return target, warnings
 }
@@ -467,6 +527,7 @@ func RunPrepareCommand(env *Env, args []string) error {
 	maxSize := fs.Int("max-size", 0, "cap each derived range at this size (0 = unlimited)")
 	jsonOut := fs.Bool("json", false, "emit the result as JSON")
 	userFlag := fs.String("user", "", "user that owns the generated /etc/subuid and /etc/subgid lines (default: derived from the id map)")
+	homeFlag := fs.String("home", "", "home directory that owns the generated storage.conf (default: the target user's home)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -524,17 +585,25 @@ func RunPrepareCommand(env *Env, args []string) error {
 
 	target, targetWarnings := resolveTarget(env, uidExtents, gidExtents, *userFlag)
 	warnings = append(warnings, targetWarnings...)
+	if *homeFlag != "" {
+		target.Home = *homeFlag
+	}
 
 	subuidLines := linesFor(target.User, uidRanges)
 	subgidLines := linesFor(target.User, gidRanges)
 	caps := CapCommands(env, selCapUID, selCapGID)
 
-	storageConf := storageConfPath(env, target)
-	storagePath := storageDropInPath(storageConf)
-	var storageContent string
+	var storageConf, storagePath, storageContent string
 	storageConfigured := false
 	info := []string{}
 	if selStorage {
+		conf, err := storageConfPath(env, target)
+		if err != nil {
+			return err
+		}
+		storageConf = conf
+		storagePath = storageDropInPath(conf)
+		var stores []string
 		mounted, mountErr := IsMountPoint(env.SharedStore)
 		switch {
 		case mountErr != nil:
@@ -542,8 +611,13 @@ func RunPrepareCommand(env *Env, args []string) error {
 		case !mounted:
 			info = append(info, fmt.Sprintf("%s is not a mount point; skipping additionalimagestores", env.SharedStore))
 		default:
-			stores := DeriveAdditionalStores(effectiveStores(env, storageConf), env.SharedStore)
-			storageContent = StorageConfContent(stores)
+			stores = DeriveAdditionalStores(effectiveStores(env, storageConf), env.SharedStore)
+		}
+		fusePath, fuseErr := ResolveFuseOverlayFS(env, effectiveConfigFor(env, storageConf))
+		if fuseErr != nil {
+			warnings = append(warnings, fmt.Sprintf("cannot generate storage.conf: %v", fuseErr))
+		} else {
+			storageContent = StorageConfContent("overlay", fusePath, stores)
 			storageConfigured = true
 		}
 	}
@@ -562,13 +636,13 @@ func RunPrepareCommand(env *Env, args []string) error {
 			warnings = append(warnings, "--write: /etc/subuid owner resolves to root; a rootless inner podman cannot use root-owned subordinate ranges (set --user / PINP_USER; writing anyway)")
 		}
 		if selUID {
-			if err := os.WriteFile(env.SubUIDFile, []byte(SubIDFileContent(target.User, uidRanges)), 0o644); err != nil {
-				return fmt.Errorf("write %s: %w", env.SubUIDFile, err)
+			if err := writeSubIDFile(env.SubUIDFile, target.User, target.UID, uidRanges); err != nil {
+				return err
 			}
 		}
 		if selGID {
-			if err := os.WriteFile(env.SubGIDFile, []byte(SubIDFileContent(target.User, gidRanges)), 0o644); err != nil {
-				return fmt.Errorf("write %s: %w", env.SubGIDFile, err)
+			if err := writeSubIDFile(env.SubGIDFile, target.User, target.GID, gidRanges); err != nil {
+				return err
 			}
 		}
 		if selCapUID {
